@@ -292,7 +292,12 @@ bool Srv6Orch::createUpdateSidList(const string sid_name, const string sid_list)
     }
     sai_attribute_t attr;
     sai_status_t status;
-    if (!exists)
+    sai_object_id_t srv6_object_id = SAI_NULL_OBJECT_ID;
+    if (exists) {
+        srv6_object_id = sid_table_[sid_name].sid_object_id;
+    }
+
+    if (srv6_object_id == SAI_NULL_OBJECT_ID)
     {
         /* Create sidlist object with list of ipv6 prefixes */
         SWSS_LOG_INFO("Create SID list");
@@ -506,10 +511,6 @@ bool Srv6Orch::createUpdateMysidEntry(string my_sid_string, const string dt_vrf,
     }
     attr.id = SAI_MY_SID_ENTRY_ATTR_ENDPOINT_BEHAVIOR;
     attr.value.s32 = end_behavior;
-    attributes.push_back(attr);
-
-    attr.id = SAI_MY_SID_ENTRY_ATTR_ENDPOINT_BEHAVIOR_FLAVOR;
-    attr.value.s32 = end_flavor;
     attributes.push_back(attr);
 
     sai_status_t status = SAI_STATUS_SUCCESS;
