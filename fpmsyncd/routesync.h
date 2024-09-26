@@ -97,7 +97,8 @@ private:
                         string& intf_list);
 
     bool getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
-                        struct rtattr *tb[], string &vpn_sid, string &src_addr);
+                        struct rtattr *tb[], vector<string> &vpn_sids,
+                        vector<string> &src_addrs);
 
     bool getSrv6LocalSidNextHop(struct nlmsghdr *h, int received_bytes,
                                 struct rtattr *tb[], string &block_len,

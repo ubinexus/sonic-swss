@@ -814,11 +814,12 @@ void RouteSync::onEvpnRouteMsg(struct nlmsghdr *h, int len)
 }
 
 bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
-                               struct rtattr *tb[], string &vpn_sid,
-                               string &src_addr)
+                               struct rtattr *tb[], vector<string> &vpn_sids,
+                               vector<string> &src_addrs)
 {
     uint16_t encap = 0;
-
+    string vpn_sid;
+    string src_addr;
     if (h->nlmsg_type == RTM_NEWROUTE)
     {
         if (!tb[RTA_MULTIPATH])
@@ -833,12 +834,14 @@ bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
                     NH_ENCAP_SRV6_ROUTE)
             {
                 parseEncapSrv6SteerRoute(tb[RTA_ENCAP], vpn_sid, src_addr);
+                vpn_sids.push_back(vpn_sid);
+                src_addrs.push_back(src_addr);
             }
             SWSS_LOG_DEBUG("Rx MsgType:%d encap:%d vpn_sid:%s src_addr:%s",
                            h->nlmsg_type, encap, vpn_sid.c_str(),
                            src_addr.c_str());
 
-            if (vpn_sid.empty())
+            if (vpn_sid.empty() || src_addr.empty())
             {
                 return false;
             }
@@ -846,8 +849,55 @@ bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
         else
         {
             /* This is a multipath route */
-            SWSS_LOG_NOTICE("Multipath SRv6 routes aren't supported");
-            return false;
+            struct rtnexthop *rtnh = (struct rtnexthop *)RTA_DATA(tb[RTA_MULTIPATH]);
+            int len = (int)RTA_PAYLOAD(tb[RTA_MULTIPATH]);
+            struct rtattr *subtb[RTA_MAX + 1];
+
+            for (;;)
+            {
+                vpn_sid = "";
+                src_addr = "";
+                if (len < (int)sizeof(*rtnh) || rtnh->rtnh_len > len)
+                {
+                    break;
+                }
+
+                if (rtnh->rtnh_len > sizeof(*rtnh))
+                {
+                    memset(subtb, 0, sizeof(subtb));
+                    netlink_parse_rtattr(subtb, RTA_MAX, RTNH_DATA(rtnh),
+                                        (int)(rtnh->rtnh_len - sizeof(*rtnh)));
+                    if (subtb[RTA_ENCAP_TYPE])
+                    {
+                        encap = *(uint16_t *)RTA_DATA(subtb[RTA_ENCAP_TYPE]);
+                        if (subtb[RTA_ENCAP] && subtb[RTA_ENCAP_TYPE] && 
+                            encap == NH_ENCAP_SRV6_ROUTE)
+                        {
+                            parseEncapSrv6SteerRoute(subtb[RTA_ENCAP], vpn_sid, src_addr);
+                            vpn_sids.push_back(vpn_sid);
+                            src_addrs.push_back(src_addr);
+                        }
+                        SWSS_LOG_DEBUG("Rx MsgType:%d encap:%d vpn_sid:%s src_addr:%s",
+                                    h->nlmsg_type, encap, vpn_sid.c_str(),
+                                    src_addr.c_str());
+
+                        if (vpn_sid.empty() || src_addr.empty())
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                if (rtnh->rtnh_len == 0)
+                {
+                    break;
+                }
+
+                len -= NLMSG_ALIGN(rtnh->rtnh_len);
+                rtnh = RTNH_NEXT(rtnh);
+            }
+            // SWSS_LOG_NOTICE("Multipath SRv6 routes aren't supported");
+            // return false;
         }
     }
     return true;
@@ -1003,54 +1053,87 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
             return;
     }
 
-    /* Get nexthop lists */
-    string vpn_sid_str;
-    string src_addr_str;
     bool ret;
+    
+    vector<string> vpn_sid_strs;
+    vector<string> src_addr_strs;
 
-    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_str, src_addr_str);
+    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_strs, src_addr_strs);
     if (ret == false)
     {
-        SWSS_LOG_NOTICE(
-            "SRv6 Route issue with RouteTable msg: %s vpn_sid:%s src_addr:%s",
-            destipprefix, vpn_sid_str.c_str(), src_addr_str.c_str());
+        SWSS_LOG_NOTICE("SRv6 Route issue with RouteTable invalid msg");
         return;
     }
 
-    if (vpn_sid_str.empty())
+    if (vpn_sid_strs.empty())
     {
         SWSS_LOG_NOTICE("SRv6 IP Prefix: %s vpn_sid is empty", destipprefix);
         return;
     }
+    
+    bool warmRestartInProgress = m_warmStartHelper.inProgress();
+
+    string segments;
+    string seg_srcs;
+    for (uint32_t i = 0; i < vpn_sid_strs.size(); i++) 
+    {
+        /* Get nexthop lists */
+        string vpn_sid_str;
+        string src_addr_str;
+        
+        vector<FieldValueTuple> fvVectorSidList;
+        vpn_sid_str = vpn_sid_strs[i];
+        FieldValueTuple sid_list("path", vpn_sid_str);
+        fvVectorSidList.push_back(sid_list);
+        
+        if (!warmRestartInProgress)
+        {
+            /* use vpn_sid as the key of sidlist*/
+            m_srv6SidListTable.set(vpn_sid_str, fvVectorSidList);
+            SWSS_LOG_DEBUG("SidListTable set msg: %s vpn_sid: %s",
+                       routeTableKey, vpn_sid_str.c_str());
+        } 
+        else 
+        {
+            SWSS_LOG_INFO(
+            "Warm-Restart mode: and SidListTable set msg: %s vpn_sid:%s",
+            routeTableKey, vpn_sid_str.c_str());
+            
+            const KeyOpFieldsValuesTuple kfvSid =
+                std::make_tuple(vpn_sid_str, SET_COMMAND, fvVectorSidList);
+            m_warmStartHelper.insertRefreshMap(kfvSid);
+        }
+        
+        src_addr_str = src_addr_strs[i];
+        if (i > 0)
+        {
+            segments += ',' + vpn_sid_str;
+            seg_srcs += ',' + src_addr_str;
+        }
+        else
+        {
+            segments += vpn_sid_str;
+            seg_srcs += src_addr_str;
+        }
+    }
 
     vector<FieldValueTuple> fvVectorRoute;
-    vector<FieldValueTuple> fvVectorSidList;
 
     /* FieldValueTuple vpn_sid("vpn_sid", vpn_sid_str); */
     /* The official solution for vpn_sid is only supported in versions after 202305, 
        and the current 202211 version uses the sidlist table to issue vpn_sid */
-    FieldValueTuple vpn_sid("segment", vpn_sid_str);
+    FieldValueTuple vpn_sid("segment", segments);
     fvVectorRoute.push_back(vpn_sid);
-    
-    FieldValueTuple sid_list("path", vpn_sid_str);
-    fvVectorSidList.push_back(sid_list);
 
-    if (!src_addr_str.empty())
-    {
-        FieldValueTuple seg_src("seg_src", src_addr_str);
-        fvVectorRoute.push_back(seg_src);
-    }
-
-    bool warmRestartInProgress = m_warmStartHelper.inProgress();
+    FieldValueTuple seg_src("seg_src", seg_srcs);
+    fvVectorRoute.push_back(seg_src);
 
     if (!warmRestartInProgress)
     {
-        /* use vpn_sid as the key of sidlist*/
-        m_srv6SidListTable.set(vpn_sid_str, fvVectorSidList);
         m_routeTable.set(routeTableKey, fvVectorRoute);
-        SWSS_LOG_DEBUG("RouteTable and SidListTable set msg: %s vpn_sid: %s src_addr:%s",
-                       routeTableKey, vpn_sid_str.c_str(),
-                       src_addr_str.c_str());
+        SWSS_LOG_DEBUG("RouteTable set msg: %s segments: %s seg_srcs:%s",
+                       routeTableKey, segments.c_str(),
+                       seg_srcs.c_str());
     }
 
     /*
@@ -1060,16 +1143,13 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
     else
     {
         SWSS_LOG_INFO(
-            "Warm-Restart mode: RouteTable and SidListTable set msg: %s vpn_sid:%s src_addr:%s",
-            routeTableKey, vpn_sid_str.c_str(), src_addr_str.c_str());
+            "Warm-Restart mode: RouteTable set msg: %s segments: %s seg_srcs:%s",
+            routeTableKey, segments.c_str(),
+            seg_srcs.c_str());
 
         const KeyOpFieldsValuesTuple kfvRt =
             std::make_tuple(routeTableKey, SET_COMMAND, fvVectorRoute);
         m_warmStartHelper.insertRefreshMap(kfvRt);
-        
-        const KeyOpFieldsValuesTuple kfvSid =
-            std::make_tuple(vpn_sid_str, SET_COMMAND, fvVectorSidList);
-        m_warmStartHelper.insertRefreshMap(kfvSid);
     }
     return;
 }
