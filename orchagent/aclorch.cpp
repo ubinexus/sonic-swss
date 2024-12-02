@@ -1787,6 +1787,10 @@ sai_object_id_t AclRulePacket::getRedirectObjectId(const string& redirect_value)
         {
             return port.m_lag_id;
         }
+        else if (port.m_type == Port::CPU)
+        {
+            return port.m_port_id;
+        }
         else
         {
             SWSS_LOG_ERROR("Wrong port type for REDIRECT action. Only physical ports and LAG ports are supported");
