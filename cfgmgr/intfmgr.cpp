@@ -18,6 +18,7 @@ using namespace swss;
 
 #define VLAN_PREFIX         "Vlan"
 #define LAG_PREFIX          "PortChannel"
+#define ETHTRUNK_PREFIX     "EthTrunk"
 #define SUBINTF_LAG_PREFIX  "Po"
 #define LOOPBACK_PREFIX     "Loopback"
 #define VNET_PREFIX         "Vnet"
@@ -33,6 +34,7 @@ IntfMgr::IntfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
         m_cfgIntfTable(cfgDb, CFG_INTF_TABLE_NAME),
         m_cfgVlanIntfTable(cfgDb, CFG_VLAN_INTF_TABLE_NAME),
         m_cfgLagIntfTable(cfgDb, CFG_LAG_INTF_TABLE_NAME),
+        m_cfgEthTrunkIntfTable(cfgDb, CFG_ETHTRUNK_INTF_TABLE_NAME),
         m_cfgLoopbackIntfTable(cfgDb, CFG_LOOPBACK_INTERFACE_TABLE_NAME),
         m_statePortTable(stateDb, STATE_PORT_TABLE_NAME),
         m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME),

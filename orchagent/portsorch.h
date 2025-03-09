@@ -69,6 +69,13 @@ struct LagMemberUpdate
     bool add;
 };
 
+struct EthTrunkMemberUpdate
+{
+    Port ethtrunk;
+    Port member;
+    bool add;
+};
+
 struct VlanMemberUpdate
 {
     Port vlan;

@@ -48,6 +48,7 @@ int main(int argc, char **argv)
         vector<string> cfg_intf_tables = {
             CFG_INTF_TABLE_NAME,
             CFG_LAG_INTF_TABLE_NAME,
+            CFG_ETHTRUNK_INTF_TABLE_NAME,
             CFG_VLAN_INTF_TABLE_NAME,
             CFG_LOOPBACK_INTERFACE_TABLE_NAME,
             CFG_VLAN_SUB_INTF_TABLE_NAME,

@@ -75,6 +75,7 @@ namespace swss {
 #define L3_INTERFACE_ZONE_SIZE     1
 #define VLAN_PREFIX                "Vlan"
 #define LAG_PREFIX                 "PortChannel"
+#define ETHTRUNK_PREFIX            "EthTrunk"
 #define ETHERNET_PREFIX            "Ethernet"
 #define LOOPBACK_PREFIX            "Loopback"
 #define ACL_TABLE_KEY_SIZE         1

@@ -297,6 +297,11 @@ static bool isValidPortTypeForLagMember(const Port& port)
     return (port.m_type == Port::Type::PHY || port.m_type == Port::Type::SYSTEM);
 }
 
+static bool isValidPortTypeForEthTrunkMember(const Port& port)
+{
+    return (port.m_type == Port::Type::PHY || port.m_type == Port::Type::SYSTEM);
+}
+
 static void getPortSerdesAttr(PortSerdesAttrMap_t &map, const PortConfig &port)
 {
     if (port.serdes.preemphasis.is_set)
@@ -4628,6 +4633,246 @@ void PortsOrch::doLagMemberTask(Consumer &consumer)
     }
 }
 
+void PortsOrch::doEthTrunkTask(Consumer &consumer)
+{
+    SWSS_LOG_ENTER();
+
+    string table_name = consumer.getTableName();
+
+    auto it = consumer.m_toSync.begin();
+    while (it != consumer.m_toSync.end())
+    {
+        auto &t = it->second;
+
+        string alias = kfvKey(t);
+        string op = kfvOp(t);
+
+        if (op == SET_COMMAND)
+        {
+            // Retrieve attributes
+            uint32_t mtu = 0;
+            string operation_status;
+            uint32_t ethtrunk_id = 0;
+
+            for (auto i : kfvFieldsValues(t))
+            {
+                if (fvField(i) == "mtu")
+                {
+                    mtu = (uint32_t)stoul(fvValue(i));
+                }
+                else if (fvField(i) == "oper_status")
+                {
+                    operation_status = fvValue(i);
+                    if (!string_oper_status.count(operation_status))
+                    {
+                        SWSS_LOG_ERROR("Invalid operation status value:%s", operation_status.c_str());
+                        it++;
+                        continue;
+                    }
+                }
+                else if (fvField(i) == "ethtrunk_id")
+                {
+                    lag_id = (uint32_t)stoul(fvValue(i));
+                }
+                else if (fvField(i) == "switch_id")
+                {
+                    switch_id = stoi(fvValue(i));
+                }
+                
+            }
+
+            // Process attributes
+            Port l;
+            if (!getPort(alias, l))
+            {
+                SWSS_LOG_ERROR("Failed to get ETHTRUNK %s", alias.c_str());
+            }
+            else
+            {
+                if (!operation_status.empty())
+                {
+                    updatePortOperStatus(l, string_oper_status.at(operation_status));
+
+                    m_portList[alias] = l;
+                }
+
+                if (mtu != 0)
+                {
+                    l.m_mtu = mtu;
+                    m_portList[alias] = l;
+                    if (l.m_rif_id)
+                    {
+                        gIntfsOrch->setRouterIntfsMtu(l);
+                    }
+                }
+            }
+
+            it = consumer.m_toSync.erase(it);
+        }
+        else if (op == DEL_COMMAND)
+        {
+            Port ethtrunk;
+            /* Cannot locate ETHTRUNK */
+            if (!getPort(alias, ethtrunk))
+            {
+                it = consumer.m_toSync.erase(it);
+                continue;
+            }
+
+            if (removeLag(ethtrunk))
+                it = consumer.m_toSync.erase(it);
+            else
+                it++;
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Unknown operation type %s", op.c_str());
+            it = consumer.m_toSync.erase(it);
+        }
+    }
+}
+
+void PortsOrch::doEthTrunkMemberTask(Consumer &consumer)
+{
+    SWSS_LOG_ENTER();
+
+    string table_name = consumer.getTableName();
+
+    auto it = consumer.m_toSync.begin();
+    while (it != consumer.m_toSync.end())
+    {
+        auto &t = it->second;
+
+        /* Retrieve ETHTRUNK alias and ETHTRUNK member alias from key */
+        string key = kfvKey(t);
+        size_t found = key.find(':');
+        /* Return if the format of key is wrong */
+        if (found == string::npos)
+        {
+            SWSS_LOG_ERROR("Failed to parse %s", key.c_str());
+            return;
+        }
+        string ethtrunk_alias = key.substr(0, found);
+        string port_alias = key.substr(found+1);
+
+        string op = kfvOp(t);
+
+        Port ethtrunk, port;
+        if (!getPort(ethtrunk_alias, ethtrunk))
+        {
+            SWSS_LOG_INFO("Failed to locate ETHTRUNK %s", ethtrunk_alias.c_str());
+            it++;
+            continue;
+        }
+
+        if (!getPort(port_alias, port))
+        {
+            SWSS_LOG_ERROR("Failed to locate port %s", port_alias.c_str());
+            it = consumer.m_toSync.erase(it);
+            continue;
+        }
+
+        /* Fail if a port type is not a valid type for being a ETHTRUNK member port.
+         * Erase invalid entry, no need to retry in this case. */
+        if (!isValidPortTypeForEthTrunkMember(port))
+        {
+            SWSS_LOG_ERROR("ETHTRUNK member port has to be of type PHY or SYSTEM");
+            it = consumer.m_toSync.erase(it);
+            continue;
+        }
+
+        /* Update a ETHTRUNK member */
+        if (op == SET_COMMAND)
+        {
+            string status;
+            for (auto i : kfvFieldsValues(t))
+            {
+                if (fvField(i) == "status")
+                    status = fvValue(i);
+            }
+
+            if (ethtrunk.m_members.find(port_alias) == ethtrunk.m_members.end())
+            {
+                if (port.m_ethtrunk_member_id != SAI_NULL_OBJECT_ID)
+                {
+                    SWSS_LOG_INFO("Port %s is already a ETHTRUNK member", port.m_alias.c_str());
+                    it++;
+                    continue;
+                }
+
+                if (!addEthTrunkMember(ethtrunk, port, status))
+                {
+                    it++;
+                    continue;
+                }
+            }
+
+            /* Sync an enabled member */
+            if (status == "enabled")
+            {
+                /* enable collection first, distribution-only mode
+                 * is not supported on Mellanox platform
+                 */
+                if (setCollectionOnEthTrunkMember(port, true) &&
+                    setDistributionOnEthTrunkMember(port, true))
+                {
+                    it = consumer.m_toSync.erase(it);
+                }
+                else
+                {
+                    it++;
+                    continue;
+                }
+            }
+            /* Sync an disabled member */
+            else /* status == "disabled" */
+            {
+                /* disable distribution first, distribution-only mode
+                 * is not supported on Mellanox platform
+                 */
+                if (setDistributionOnEthTrunkMember(port, false) &&
+                    setCollectionOnEthTrunkMember(port, false))
+                {
+                    it = consumer.m_toSync.erase(it);
+                }
+                else
+                {
+                    it++;
+                    continue;
+                }
+            }
+        }
+        /* Remove a LAG member */
+        else if (op == DEL_COMMAND)
+        {
+            /* Assert the LAG member exists */
+            assert(ethtrunk.m_members.find(port_alias) != ethtrunk.m_members.end());
+
+            if (!port.m_ethtrunk_id || !port.m_ethtrunk_member_id)
+            {
+                SWSS_LOG_WARN("Member %s not found in LAG %s lid:%" PRIx64 " lmid:%" PRIx64 ",",
+                        port.m_alias.c_str(), ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id, port.m_ethtrunk_member_id);
+                it = consumer.m_toSync.erase(it);
+                continue;
+            }
+
+            if (removeEthTrunkMember(ethtrunk, port))
+            {
+                it = consumer.m_toSync.erase(it);
+            }
+            else
+            {
+                it++;
+            }
+        }
+        else
+        {
+            SWSS_LOG_ERROR("Unknown operation type %s", op.c_str());
+            it = consumer.m_toSync.erase(it);
+        }
+    }
+}
+
 void PortsOrch::doTask()
 {
     auto tableOrder = {
@@ -6207,6 +6452,195 @@ bool PortsOrch::setDistributionOnLagMember(Port &lagMember, bool enableDistribut
 
     return true;
 }
+
+bool PortsOrch::addEthTrunkMember(Port &ethtrunk, Port &port, string member_status)
+{
+    SWSS_LOG_ENTER();
+    bool enableForwarding = (member_status == "enabled");
+
+    sai_uint32_t pvid;
+    if (getPortPvid(ethtrunk, pvid))
+    {
+        setPortPvid (port, pvid);
+    }
+
+    sai_attribute_t attr;
+    vector<sai_attribute_t> attrs;
+
+    attr.id = SAI_ETHTRUNK_MEMBER_ATTR_ETHTRUNK_ID;
+    attr.value.oid = ethtrunk.m_ethtrunk_id;
+    attrs.push_back(attr);
+
+    attr.id = SAI_ETHTRUNK_MEMBER_ATTR_PORT_ID;
+    attr.value.oid = port.m_port_id;
+    attrs.push_back(attr);
+
+    if (!enableForwarding && port.m_type != Port::SYSTEM)
+    {
+        attr.id = SAI_ETHTRUNK_MEMBER_ATTR_EGRESS_DISABLE;
+        attr.value.booldata = true;
+        attrs.push_back(attr);
+
+        attr.id = SAI_ETHTRUNK_MEMBER_ATTR_INGRESS_DISABLE;
+        attr.value.booldata = true;
+        attrs.push_back(attr);
+    }
+
+    sai_object_id_t ethtrunk_member_id;
+    sai_status_t status = sai_ethtrunk_api->create_ethtrunk_member(&ethtrunk_member_id, gSwitchId, (uint32_t)attrs.size(), attrs.data());
+
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to add member %s to ETHTRUNK %s lid:%" PRIx64 " pid:%" PRIx64,
+                port.m_alias.c_str(), ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id, port.m_port_id);
+        task_process_status handle_status = handleSaiCreateStatus(SAI_API_ETHTRUNK, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("Add member %s to ETHTRUNK %s lid:%" PRIx64 " pid:%" PRIx64,
+            port.m_alias.c_str(), ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id, port.m_port_id);
+
+    port.m_ethtrunk_id = ethtrunk.m_ethtrunk_id;
+    port.m_ethtrunk_member_id = ethtrunk_member_id;
+    m_portList[port.m_alias] = port;
+    ethtrunk.m_members.insert(port.m_alias);
+
+    m_portList[ethtrunk.m_alias] = ethtrunk;
+
+    increasePortRefCount(port.m_alias);
+
+    EthTrunkMemberUpdate update = { ethtrunk, port, true };
+    notify(SUBJECT_TYPE_ETHTRUNK_MEMBER_CHANGE, static_cast<void *>(&update));
+
+    return true;
+}
+
+bool PortsOrch::removeEthtrunkMember(Port &ethtrunk, Port &port)
+{
+    sai_status_t status = sai_ethtrunk_api->remove_ethtrunk_member(port.m_ethtrunk_member_id);
+
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to remove member %s from ETHTRUNK %s lid:%" PRIx64 " lmid:%" PRIx64,
+                port.m_alias.c_str(), ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id, port.m_ethtrunk_member_id);
+        task_process_status handle_status = handleSaiRemoveStatus(SAI_API_ETHTRUNK, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("Remove member %s from ETHTRUNK %s lid:%" PRIx64 " lmid:%" PRIx64,
+            port.m_alias.c_str(), ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id, port.m_ethtrunk_member_id);
+
+    port.m_ethtrunk_id = 0;
+    port.m_ethtrunk_member_id = 0;
+    m_portList[port.m_alias] = port;
+    ethtrunk.m_members.erase(port.m_alias);
+    m_portList[ethtrunk.m_alias] = ethtrunk;
+
+    decreasePortRefCount(port.m_alias);
+
+    EthTrunkMemberUpdate update = { ethtrunk, port, false };
+    notify(SUBJECT_TYPE_ETHTRUNK_MEMBER_CHANGE, static_cast<void *>(&update));
+
+    return true;
+}
+
+bool PortsOrch::setEthTrunkTpid(sai_object_id_t id, sai_uint16_t tpid)
+{
+    SWSS_LOG_ENTER();
+    sai_status_t status = SAI_STATUS_SUCCESS;
+    sai_attribute_t attr;
+
+    attr.id = SAI_ETHTRUNK_ATTR_TPID;
+
+    attr.value.u16 = (uint16_t)tpid;
+
+    status = sai_ethtrunk_api->set_ethtrunk_attribute(id, &attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to set TPID 0x%x to ETHTRUNK pid:%" PRIx64 ", rv:%d",
+                attr.value.u16, id, status);
+        task_process_status handle_status = handleSaiSetStatus(SAI_API_ETHTRUNK, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+    else
+    {
+        SWSS_LOG_NOTICE("Set TPID 0x%x to ETHTRUNK pid:%" PRIx64 , attr.value.u16, id);
+    }
+    return true;
+}
+
+
+bool PortsOrch::setCollectionOnEthTrunkMember(Port &ethtrunkMember, bool enableCollection)
+{
+    /* Port must be ETHTRUNK member */
+    assert(ethtrunkMember.m_ethtrunk_member_id);
+
+    sai_status_t status = SAI_STATUS_FAILURE;
+    sai_attribute_t attr {};
+
+    attr.id = SAI_ETHTRUNK_MEMBER_ATTR_INGRESS_DISABLE;
+    attr.value.booldata = !enableCollection;
+
+    status = sai_ethtrunk_api->set_ethtrunk_member_attribute(ethtrunkMember.m_ethtrunk_member_id, &attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to %s collection on ETHTRUNK member %s",
+            enableCollection ? "enable" : "disable",
+            ethtrunkMember.m_alias.c_str());
+        task_process_status handle_status = handleSaiSetStatus(SAI_API_ETHTRUNK, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("%s collection on ETHTRUNK member %s",
+        enableCollection ? "Enable" : "Disable",
+        ethtrunkMember.m_alias.c_str());
+
+    return true;
+}
+
+bool PortsOrch::setDistributionOnEthTrunkMember(Port &ethtrunkMember, bool enableDistribution)
+{
+    /* Port must be ETHTRUNK member */
+    assert(ethtrunkMember.m_ethtrunk_member_id);
+
+    sai_status_t status = SAI_STATUS_FAILURE;
+    sai_attribute_t attr {};
+
+    attr.id = SAI_ETHTRUNK_MEMBER_ATTR_EGRESS_DISABLE;
+    attr.value.booldata = !enableDistribution;
+
+    status = sai_ethtrunk_api->set_ethtrunk_member_attribute(ethtrunkMember.m_ethtrunk_member_id, &attr);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to %s distribution on ETHTRUNK member %s",
+            enableDistribution ? "enable" : "disable",
+            ethtrunkMember.m_alias.c_str());
+        task_process_status handle_status = handleSaiSetStatus(SAI_API_ETHTRUNK, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("%s distribution on ETHTRUNK member %s",
+        enableDistribution ? "Enable" : "Disable",
+        ethtrunkMember.m_alias.c_str());
+
+    return true;
+}
+
 
 bool PortsOrch::addTunnel(string tunnel_alias, sai_object_id_t tunnel_id, bool hwlearning)
 {

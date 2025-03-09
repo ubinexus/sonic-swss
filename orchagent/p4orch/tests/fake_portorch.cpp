@@ -396,6 +396,14 @@ void PortsOrch::doLagMemberTask(Consumer &consumer)
 {
 }
 
+void PortsOrch::doEthTrunkTask(Consumer &consumer)
+{
+}
+
+void PortsOrch::doEthTrunkMemberTask(Consumer &consumer)
+{
+}
+
 void PortsOrch::doTask(NotificationConsumer &consumer)
 {
 }
@@ -468,6 +476,16 @@ bool PortsOrch::removeLag(Port lag)
     return true;
 }
 
+bool PortsOrch::addEthTrunk(string ethtrunk, uint32_t spa_id, int32_t switch_id)
+{
+    return true;
+}
+
+bool PortsOrch::removeEthTrunk(Port ethtrunk)
+{
+    return true;
+}
+
 bool PortsOrch::setLagTpid(sai_object_id_t id, sai_uint16_t tpid)
 {
     return true;
@@ -479,6 +497,16 @@ bool PortsOrch::addLagMember(Port &lag, Port &port, string member_status)
 }
 
 bool PortsOrch::removeLagMember(Port &lag, Port &port)
+{
+    return true;
+}
+
+bool PortsOrch::addEthTrunkMember(Port &ethtrunk, Port &port, string member_status)
+{
+    return true;
+}
+
+bool PortsOrch::removeEthTrunkMember(Port &ethtrunk, Port &port)
 {
     return true;
 }

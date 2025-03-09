@@ -23,6 +23,7 @@ NeighSync::NeighSync(RedisPipeline *pipelineAppDB, DBConnector *stateDb, DBConne
     m_stateNeighRestoreTable(stateDb, STATE_NEIGH_RESTORE_TABLE_NAME),
     m_cfgInterfaceTable(cfgDb, CFG_INTF_TABLE_NAME),
     m_cfgLagInterfaceTable(cfgDb, CFG_LAG_INTF_TABLE_NAME),
+    m_cfgEthTrunkInterfaceTable(cfgDb, CFG_ETHTRUNK_INTF_TABLE_NAME),
     m_cfgVlanInterfaceTable(cfgDb, CFG_VLAN_INTF_TABLE_NAME),
     m_cfgPeerSwitchTable(cfgDb, CFG_PEER_SWITCH_TABLE_NAME)
 {
@@ -194,6 +195,14 @@ bool NeighSync::isLinkLocalEnabled(const string &port)
     else if (!port.compare(0, strlen("PortChannel"), "PortChannel"))
     {
         if (!m_cfgLagInterfaceTable.get(port, values))
+        {
+            SWSS_LOG_INFO("IPv6 Link local is not enabled on %s", port.c_str());
+            return false;
+        }
+    }
+    else if (!port.compare(0, strlen("EthTrunk"), "EthTrunk"))
+    {
+        if (!m_cfgEthTrunkInterfaceTable.get(port, values))
         {
             SWSS_LOG_INFO("IPv6 Link local is not enabled on %s", port.c_str());
             return false;

@@ -47,6 +47,7 @@ sai_next_hop_group_api_t*   sai_next_hop_group_api;
 sai_route_api_t*            sai_route_api;
 sai_mpls_api_t*             sai_mpls_api;
 sai_lag_api_t*              sai_lag_api;
+sai_ethtrunk_api_t*         sai_ethtrunk_api;
 sai_policer_api_t*          sai_policer_api;
 sai_tunnel_api_t*           sai_tunnel_api;
 sai_queue_api_t*            sai_queue_api;

@@ -132,6 +132,7 @@ int main(int argc, char **argv)
             CFG_NAT_GLOBAL_TABLE_NAME,
             CFG_INTF_TABLE_NAME,
             CFG_LAG_INTF_TABLE_NAME,
+            CFG_ETHTRUNK_INTF_TABLE_NAME,
             CFG_VLAN_INTF_TABLE_NAME,
             CFG_LOOPBACK_INTERFACE_TABLE_NAME,
             CFG_ACL_TABLE_TABLE_NAME,
