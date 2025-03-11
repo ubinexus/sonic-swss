@@ -257,7 +257,7 @@ private:
     /* Declare APPL_DB, CFG_DB and STATE_DB tables */
     ProducerStateTable m_appNatTableProducer, m_appNaptTableProducer, m_appNatGlobalTableProducer;
     ProducerStateTable m_appTwiceNatTableProducer, m_appTwiceNaptTableProducer, m_appNatDnatPoolProducer;
-    Table m_statePortTable, m_stateLagTable, m_stateVlanTable, m_stateInterfaceTable, m_appNaptPoolIpTable;
+    Table m_statePortTable, m_stateLagTable, m_stateEthTrunkTable, m_stateVlanTable, m_stateInterfaceTable, m_appNaptPoolIpTable;
     Table m_stateWarmRestartEnableTable, m_stateWarmRestartTable;
 
     /* Declare containers to store NAT Info */

@@ -40,7 +40,7 @@ private:
     bool isIntfOperUp(const std::string &alias);
     unique_ptr<Table> m_cfgVoqInbandInterfaceTable;
 
-    Table m_statePortTable, m_stateLagTable, m_stateVlanTable, m_stateIntfTable, m_stateNeighRestoreTable;
+    Table m_statePortTable, m_stateLagTable, m_stateEthTrunkTable, m_stateVlanTable, m_stateIntfTable, m_stateNeighRestoreTable;
     struct nl_sock *m_nl_sock;
 };
 

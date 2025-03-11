@@ -38,6 +38,7 @@ IntfMgr::IntfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
         m_cfgLoopbackIntfTable(cfgDb, CFG_LOOPBACK_INTERFACE_TABLE_NAME),
         m_statePortTable(stateDb, STATE_PORT_TABLE_NAME),
         m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME),
+        m_stateEthTrunkTable(stateDb, STATE_ETHTRUNK_TABLE_NAME),
         m_stateVlanTable(stateDb, STATE_VLAN_TABLE_NAME),
         m_stateVrfTable(stateDb, STATE_VRF_TABLE_NAME),
         m_stateIntfTable(stateDb, STATE_INTERFACE_TABLE_NAME),
@@ -281,6 +282,9 @@ void IntfMgr::buildIntfReplayList(void)
     std::copy( intfList.begin(), intfList.end(), std::inserter( m_pendingReplayIntfList, m_pendingReplayIntfList.end() ) );
 
     m_cfgLagIntfTable.getKeys(intfList);
+    std::copy( intfList.begin(), intfList.end(), std::inserter( m_pendingReplayIntfList, m_pendingReplayIntfList.end() ) );
+
+    m_cfgEthTrunkIntfTable.getKeys(intfList);
     std::copy( intfList.begin(), intfList.end(), std::inserter( m_pendingReplayIntfList, m_pendingReplayIntfList.end() ) );
 
     SWSS_LOG_INFO("Found %d Total Intfs to be replayed", (int)m_pendingReplayIntfList.size() );
@@ -651,6 +655,14 @@ bool IntfMgr::isIntfStateOk(const string &alias)
         if (m_stateLagTable.get(alias, temp))
         {
             SWSS_LOG_DEBUG("Lag %s is ready", alias.c_str());
+            return true;
+        }
+    }
+    else if (!alias.compare(0, strlen(ETHTRUNK_PREFIX), ETHTRUNK_PREFIX))
+    {
+        if (m_stateEthTrunkTable.get(alias, temp))
+        {
+            SWSS_LOG_DEBUG("ETHTRUNK %s is ready", alias.c_str());
             return true;
         }
     }

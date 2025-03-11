@@ -45,6 +45,7 @@ NbrMgr::NbrMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, con
         Orch(cfgDb, tableNames),
         m_statePortTable(stateDb, STATE_PORT_TABLE_NAME),
         m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME),
+        m_stateEthTrunkTable(stateDb, STATE_ETHTRUNK_TABLE_NAME),
         m_stateVlanTable(stateDb, STATE_VLAN_TABLE_NAME),
         m_stateIntfTable(stateDb, STATE_INTERFACE_TABLE_NAME),
         m_stateNeighRestoreTable(stateDb, STATE_NEIGH_RESTORE_TABLE_NAME)

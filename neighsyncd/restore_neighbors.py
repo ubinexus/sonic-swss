@@ -86,6 +86,8 @@ def check_state_db(intf, db):
         table_name = 'VLAN_MEMBER_TABLE|{}|*'.format(intf)
     elif 'PortChannel' in intf:
         table_name = 'LAG_MEMBER_TABLE|{}|*'.format(intf)
+    elif 'EthTrunk' in intf:
+        table_name = 'ETHTRUNK_MEMBER_TABLE|{}|*'.format(intf)
     else:
         return True
     key = db.keys(db.STATE_DB, table_name)

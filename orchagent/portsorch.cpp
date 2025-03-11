@@ -3135,6 +3135,8 @@ bool PortsOrch::bake()
     addExistingData(m_portTable.get());
     addExistingData(APP_LAG_TABLE_NAME);
     addExistingData(APP_LAG_MEMBER_TABLE_NAME);
+    addExistingData(APP_ETHTRUNK_TABLE_NAME);
+    addExistingData(APP_ETHTRUNK_MEMBER_TABLE_NAME);
     addExistingData(APP_VLAN_TABLE_NAME);
     addExistingData(APP_VLAN_MEMBER_TABLE_NAME);
 
@@ -4842,7 +4844,7 @@ void PortsOrch::doEthTrunkMemberTask(Consumer &consumer)
                 }
             }
         }
-        /* Remove a LAG member */
+        /* Remove a ETHTRUNK member */
         else if (op == DEL_COMMAND)
         {
             /* Assert the LAG member exists */
@@ -4879,6 +4881,8 @@ void PortsOrch::doTask()
         APP_PORT_TABLE_NAME,
         APP_LAG_TABLE_NAME,
         APP_LAG_MEMBER_TABLE_NAME,
+        APP_ETHTRUNK_TABLE_NAME,
+        APP_ETHTRUNK_MEMBER_TABLE_NAME,
         APP_VLAN_TABLE_NAME,
         APP_VLAN_MEMBER_TABLE_NAME
     };
@@ -4934,6 +4938,14 @@ void PortsOrch::doTask(Consumer &consumer)
         else if (table_name == APP_LAG_MEMBER_TABLE_NAME || table_name == CHASSIS_APP_LAG_MEMBER_TABLE_NAME)
         {
             doLagMemberTask(consumer);
+        }
+        else if (table_name == APP_ETHTRUNK_TABLE_NAME)
+        {
+            doEthTrunkTask(consumer);
+        }
+        else if (table_name == APP_ETHTRUNK_MEMBER_TABLE_NAME)
+        {
+            doEthTrunkMemberTask(consumer);
         }
     }
 }

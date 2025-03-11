@@ -36,6 +36,7 @@ NatMgr::NatMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, con
         Orch(cfgDb, tableNames),
         m_statePortTable(stateDb, STATE_PORT_TABLE_NAME),
         m_stateLagTable(stateDb, STATE_LAG_TABLE_NAME),
+        m_stateEthTrunkTable(stateDb, STATE_ETHTRUNK_TABLE_NAME),
         m_stateVlanTable(stateDb, STATE_VLAN_TABLE_NAME),
         m_stateInterfaceTable(stateDb, STATE_INTERFACE_TABLE_NAME),
         m_stateWarmRestartEnableTable(stateDb, STATE_WARM_RESTART_ENABLE_TABLE_NAME),
@@ -114,6 +115,15 @@ bool NatMgr::isPortStateOk(const string &port)
             return true;
         }
         SWSS_LOG_INFO("Lag %s is not yet ready", port.c_str());
+    }
+    else if (!port.compare(0, strlen(ETHTRUNK_PREFIX), ETHTRUNK_PREFIX))
+    {
+        if (m_stateEthTrunkTable.get(port, temp))
+        {
+            SWSS_LOG_INFO("EthTrunk %s is ready", port.c_str());
+            return true;
+        }
+        SWSS_LOG_INFO("EthTrunk %s is not yet ready", port.c_str());
     }
     else if (!port.compare(0, strlen(ETHERNET_PREFIX), ETHERNET_PREFIX))
     {
@@ -7409,10 +7419,11 @@ void NatMgr::doNatIpInterfaceTask(Consumer &consumer)
             SWSS_LOG_INFO("Key size %zu for %s", keys.size(), key.c_str());
         }
 
-        /* Ensure the key starts with "Vlan" or "Ethernet" or "PortChannel" or "Loopback", otherwise ignore */
+        /* Ensure the key starts with "Vlan" or "Ethernet" or "PortChannel" "EthTrunk" or "Loopback", otherwise ignore */
         if ((strncmp(keys[0].c_str(), VLAN_PREFIX, strlen(VLAN_PREFIX))) and
             (strncmp(keys[0].c_str(), ETHERNET_PREFIX, strlen(ETHERNET_PREFIX))) and
             (strncmp(keys[0].c_str(), LOOPBACK_PREFIX, strlen(LOOPBACK_PREFIX))) and
+            (strncmp(keys[0].c_str(), ETHTRUNK_PREFIX, strlen(ETHTRUNK_PREFIX))) and
             (strncmp(keys[0].c_str(), LAG_PREFIX, strlen(LAG_PREFIX))))
         {
             SWSS_LOG_INFO("Invalid key %s format, skipping %s", keys[0].c_str(), key.c_str());
@@ -8176,6 +8187,7 @@ void NatMgr::doTask(Consumer &consumer)
         doNatGlobalTask(consumer);
     }
     else if ((table_name == CFG_INTF_TABLE_NAME) || (table_name == CFG_LAG_INTF_TABLE_NAME) ||
+             (table_name == CFG_ETHTRUNK_INTF_TABLE_NAME) ||
              (table_name == CFG_VLAN_INTF_TABLE_NAME) || (table_name == CFG_LOOPBACK_INTERFACE_TABLE_NAME))
     {
         SWSS_LOG_INFO("Received update from CFG_INTF_TABLE_NAME");
