@@ -4655,7 +4655,8 @@ void PortsOrch::doEthTrunkTask(Consumer &consumer)
             uint32_t mtu = 0;
             string operation_status;
             uint32_t ethtrunk_id = 0;
-
+            int32_t switch_id = -1;
+            
             for (auto i : kfvFieldsValues(t))
             {
                 if (fvField(i) == "mtu")
@@ -4674,13 +4675,22 @@ void PortsOrch::doEthTrunkTask(Consumer &consumer)
                 }
                 else if (fvField(i) == "ethtrunk_id")
                 {
-                    lag_id = (uint32_t)stoul(fvValue(i));
+                    ethtrunk_id = (uint32_t)stoul(fvValue(i));
                 }
                 else if (fvField(i) == "switch_id")
                 {
                     switch_id = stoi(fvValue(i));
                 }
                 
+            }
+
+            if (m_portList.find(alias) == m_portList.end())
+            {
+                if (!addEthTrunk(alias, ethtrunk_id, switch_id))
+                {
+                    it++;
+                    continue;
+                }
             }
 
             // Process attributes
@@ -4721,7 +4731,7 @@ void PortsOrch::doEthTrunkTask(Consumer &consumer)
                 continue;
             }
 
-            if (removeLag(ethtrunk))
+            if (removeEthTrunk(ethtrunk))
                 it = consumer.m_toSync.erase(it);
             else
                 it++;
@@ -6463,6 +6473,170 @@ bool PortsOrch::setDistributionOnLagMember(Port &lagMember, bool enableDistribut
         lagMember.m_alias.c_str());
 
     return true;
+}
+
+bool PortsOrch::addEthTrunk(string ethtrunk_alias, uint32_t spa_id, int32_t switch_id)
+{
+    SWSS_LOG_ENTER();
+
+    auto ethtrunkport = m_portList.find(ethtrunk_alias);
+    if (ethtrunkport != m_portList.end())
+    {
+        /* The deletion of bridgeport attached to the ethtrunk may still be
+         * pending due to fdb entries still present on the ethtrunk. Wait
+         * until the cleanup is done.
+         */
+        if (m_portList[ethtrunk_alias].m_bridge_port_id != SAI_NULL_OBJECT_ID)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    vector<sai_attribute_t> ethtrunk_attrs;
+    string system_ethtrunk_alias = ethtrunk_alias;
+
+    sai_object_id_t ethtrunk_id;
+    sai_status_t status = sai_ethtrunk_api->create_ethtrunk(&ethtrunk_id, gSwitchId, static_cast<uint32_t>(ethtrunk_attrs.size()), ethtrunk_attrs.data());
+
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to create LAG %s lid:%" PRIx64, ethtrunk_alias.c_str(), ethtrunk_id);
+        task_process_status handle_status = handleSaiCreateStatus(SAI_API_LAG, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("Create an empty LAG %s lid:%" PRIx64, ethtrunk_alias.c_str(), ethtrunk_id);
+
+    Port ethtrunk(ethtrunk_alias, Port::LAG);
+    ethtrunk.m_ethtrunk_id = ethtrunk_id;
+    ethtrunk.m_members = set<string>();
+    m_portList[ethtrunk_alias] = ethtrunk;
+    m_port_ref_count[ethtrunk_alias] = 0;
+    saiOidToAlias[ethtrunk_id] = ethtrunk_alias;
+
+    PortUpdate update = { ethtrunk, true };
+    notify(SUBJECT_TYPE_PORT_CHANGE, static_cast<void *>(&update));
+
+    FieldValueTuple tuple(ethtrunk_alias, sai_serialize_object_id(ethtrunk_id));
+    vector<FieldValueTuple> fields;
+    fields.push_back(tuple);
+    m_counterEthTrunkTable->set("", fields);
+
+    if (gMySwitchType == "voq")
+    {
+        // If this is voq switch, record system ethtrunk info
+
+        ethtrunk.m_system_ethtrunk_info.alias = system_ethtrunk_alias;
+        ethtrunk.m_system_ethtrunk_info.switch_id = switch_id;
+        ethtrunk.m_system_ethtrunk_info.spa_id = spa_id;
+
+        // This will update port list with local port channel name for local port channels
+        // and with system ethtrunk name for the system ethtrunks received from chassis app db
+
+        m_portList[ethtrunk_alias] = ethtrunk;
+
+        // Sync to SYSTEM_LAG_TABLE of CHASSIS_APP_DB
+
+        voqSyncAddEthTrunk(ethtrunk);
+    }
+
+    return true;
+}
+
+bool PortsOrch::removeEthTrunk(Port ethtrunk)
+{
+    SWSS_LOG_ENTER();
+
+    if (m_port_ref_count[ethtrunk.m_alias] > 0)
+    {
+        SWSS_LOG_ERROR("Failed to remove ref count %d LAG %s",
+                        m_port_ref_count[ethtrunk.m_alias],
+                        ethtrunk.m_alias.c_str());
+        return false;
+    }
+
+    /* Retry when the LAG still has members */
+    if (ethtrunk.m_members.size() > 0)
+    {
+        SWSS_LOG_ERROR("Failed to remove non-empty LAG %s", ethtrunk.m_alias.c_str());
+        return false;
+    }
+    if (m_portVlanMember[ethtrunk.m_alias].size() > 0)
+    {
+        SWSS_LOG_ERROR("Failed to remove LAG %s, it is still in VLAN", ethtrunk.m_alias.c_str());
+        return false;
+    }
+
+    if (ethtrunk.m_bridge_port_id != SAI_NULL_OBJECT_ID)
+    {
+        return false;
+    }
+
+    sai_status_t status = sai_ethtrunk_api->remove_ethtrunk(ethtrunk.m_ethtrunk_id);
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to remove LAG %s lid:%" PRIx64, ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id);
+        task_process_status handle_status = handleSaiRemoveStatus(SAI_API_LAG, status);
+        if (handle_status != task_success)
+        {
+            return parseHandleSaiStatusFailure(handle_status);
+        }
+    }
+
+    SWSS_LOG_NOTICE("Remove LAG %s lid:%" PRIx64, ethtrunk.m_alias.c_str(), ethtrunk.m_ethtrunk_id);
+
+    saiOidToAlias.erase(ethtrunk.m_ethtrunk_id);
+    m_portList.erase(ethtrunk.m_alias);
+    m_port_ref_count.erase(ethtrunk.m_alias);
+
+    PortUpdate update = { ethtrunk, false };
+    notify(SUBJECT_TYPE_PORT_CHANGE, static_cast<void *>(&update));
+
+    m_counterEthTrunkTable->hdel("", ethtrunk.m_alias);
+
+    if (gMySwitchType == "voq")
+    {
+        // Free the ethtrunk id, if this is local LAG
+
+        if (ethtrunk.m_system_ethtrunk_info.switch_id == gVoqMySwitchId)
+        {
+            int32_t rv;
+            int32_t spa_id = ethtrunk.m_system_ethtrunk_info.spa_id;
+
+            rv = m_ethtrunkIdAllocator->ethtrunkIdDel(ethtrunk.m_system_ethtrunk_info.alias);
+
+            if (rv != spa_id)
+            {
+                SWSS_LOG_ERROR("Failed to delete LAG id %d of local ethtrunk %s rv:%d", spa_id, ethtrunk.m_alias.c_str(), rv);
+                return false;
+            }
+
+            // Sync to SYSTEM_LAG_TABLE of CHASSIS_APP_DB
+
+            voqSyncDelEthTrunk(ethtrunk);
+        }
+    }
+
+    return true;
+}
+
+void PortsOrch::getEthTrunkMember(Port &ethtrunk, vector<Port> &portv)
+{
+    Port member;
+
+    for (auto &name: ethtrunk.m_members)
+    {
+        if (!getPort(name, member))
+        {
+            SWSS_LOG_ERROR("Failed to get port for %s alias", name.c_str());
+            return;
+        }
+        portv.push_back(member);
+    }
 }
 
 bool PortsOrch::addEthTrunkMember(Port &ethtrunk, Port &port, string member_status)

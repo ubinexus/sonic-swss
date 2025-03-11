@@ -55,6 +55,11 @@ IntfMgr::IntfMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
     auto stateLagConsumer = new Consumer(subscriberStateLagTable, this, STATE_LAG_TABLE_NAME);
     Orch::addExecutor(stateLagConsumer);
 
+    auto subscriberStateEthTrunkTable = new swss::SubscriberStateTable(stateDb,
+            STATE_ETHTRUNK_TABLE_NAME, TableConsumable::DEFAULT_POP_BATCH_SIZE, 200);
+    auto stateEthTrunkTConsumer = new Consumer(subscriberStateEthTrunkTable, this, STATE_ETHTRUNK_TABLE_NAME);
+    Orch::addExecutor(stateEthTrunkTConsumer);
+
     if (!WarmStart::isWarmStart())
     {
         flushLoopbackIntfs();
@@ -1139,7 +1144,7 @@ void IntfMgr::doTask(Consumer &consumer)
     while (it != consumer.m_toSync.end())
     {
         KeyOpFieldsValuesTuple t = it->second;
-        if ((table_name == STATE_PORT_TABLE_NAME) || (table_name == STATE_LAG_TABLE_NAME))
+        if ((table_name == STATE_PORT_TABLE_NAME) || (table_name == STATE_LAG_TABLE_NAME) || (table_name == STATE_ETHTRUNK_TABLE_NAME))
         {
             doPortTableTask(kfvKey(t), kfvFieldsValues(t), kfvOp(t));
         }
