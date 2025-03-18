@@ -253,6 +253,7 @@ void TeamMgr::doLagTask(Consumer &consumer)
             int min_links = 0;
             bool fallback = false;
             bool fast_rate = false;
+            bool activebackup = false;
             string admin_status = DEFAULT_ADMIN_STATUS_STR;
             string mtu = DEFAULT_MTU_STR;
             string learn_mode;
@@ -272,6 +273,12 @@ void TeamMgr::doLagTask(Consumer &consumer)
                     fallback = fvValue(i) == "true";
                     SWSS_LOG_INFO("Get fallback option %s",
                             fallback ? "true" : "false");
+                }
+                else if (fvField(i) == "activebackup")
+                {
+                    activebackup = fvValue(i) == "true";
+                    SWSS_LOG_INFO("Get activebackup option %s",
+                            activebackup ? "true" : "false");
                 }
                 else if (fvField(i) == "admin_status")
                 {
@@ -305,7 +312,7 @@ void TeamMgr::doLagTask(Consumer &consumer)
 
             if (m_lagList.find(alias) == m_lagList.end())
             {
-                if (addLag(alias, min_links, fallback, fast_rate) == task_need_retry)
+                if (addLag(alias, min_links, fallback, activebackup, fast_rate) == task_need_retry)
                 {
                     it++;
                     continue;
@@ -560,7 +567,7 @@ bool TeamMgr::setLagLearnMode(const string &alias, const string &learn_mode)
     return true;
 }
 
-task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fallback, bool fast_rate)
+task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fallback, bool activebackup, bool fast_rate)
 {
     SWSS_LOG_ENTER();
 
@@ -604,8 +611,16 @@ task_process_status TeamMgr::addLag(const string &alias, int min_links, bool fal
     conf << "'{\"device\":\"" << alias << "\","
          << "\"hwaddr\":\"" << mac_boot.to_string() << "\","
          << "\"runner\":{"
-         << "\"active\":true,"
-         << "\"name\":\"lacp\"";
+         << "\"active\":true,";
+
+    if (activebackup)
+    {
+        conf << "\"name\":\"activebackup\"";
+    } 
+    else 
+    {
+        conf << "\"name\":\"lacp\"";
+    }
 
     if (min_links != 0)
     {
@@ -661,6 +676,27 @@ bool TeamMgr::removeLag(const string &alias)
     SWSS_LOG_NOTICE("Stop port channel %s", alias.c_str());
 
     return true;
+}
+
+bool TeamMgr::isActiveBackup(const string& lag)
+{
+    vector <FieldValueTuple> fvs;
+    m_cfgLagTable.get(lag, fvs);
+
+    auto it = find_if(fvs.begin(), fvs.end(), [](const FieldValueTuple& fv)
+    {
+        return fv.first == "activebackup";
+    });
+    
+    if (it != fvs.end())
+    {
+        if (it->second == "true")
+        {
+           return true;
+        }
+    }
+    
+    return false;
 }
 
 // Port-channel names are in the pattern of "PortChannel####"
@@ -734,7 +770,6 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
         return task_ignore;
     }
 
-    uint16_t keyId = generateLacpKey(lag);
     cmd.str("");
     cmd.clear();
 
@@ -743,10 +778,13 @@ task_process_status TeamMgr::addLagMember(const string &lag, const string &membe
     // teamdctl <port_channel_name> port config update <member> { "lacp_key": <lacp_key>, "link_watch": { "name": "ethtool" } };
     // teamdctl <port_channel_name> port add <member>;
     cmd << IP_CMD << " link set dev " << shellquote(member) << " down; ";
-    cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port config update " << shellquote(member)
-        << " '{\"lacp_key\":"
-        << keyId
-        << ",\"link_watch\": {\"name\": \"ethtool\"} }'; ";
+    cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port config update " << shellquote(member);
+    cmd << " '{";
+    if (!isActiveBackup(lag)) {
+        uint16_t keyId = generateLacpKey(lag);
+        cmd << "\"lacp_key\":" << keyId << ",";
+    } 
+    cmd << "\"link_watch\": {\"name\": \"ethtool\"} }'; ";
     cmd << TEAMDCTL_CMD << " " << shellquote(lag) << " port add " << shellquote(member);
 
     if (exec(cmd.str(), res) != 0)
