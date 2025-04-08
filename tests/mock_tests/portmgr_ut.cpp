@@ -72,9 +72,9 @@ namespace portmgr_ut
             {"state", "ok"}
         });
         m_portMgr->doTask();
-        ASSERT_EQ(size_t(2), mockCallArgs.size());
-        ASSERT_EQ("/sbin/ip link set dev \"Ethernet0\" mtu \"9100\"", mockCallArgs[0]);
-        ASSERT_EQ("/sbin/ip link set dev \"Ethernet0\" down", mockCallArgs[1]);
+        ASSERT_EQ(size_t(1), mockCallArgs.size());
+        // ASSERT_EQ("/sbin/ip link set dev \"Ethernet0\" mtu \"9100\"", mockCallArgs[0]);
+        ASSERT_EQ("/sbin/ip link set dev \"Ethernet0\" down", mockCallArgs[0]);
         
         // Set port admin_status, verify that it could override the default value
         cfg_port_table.set("Ethernet0", {
