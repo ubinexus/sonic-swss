@@ -219,7 +219,7 @@ void PortMgr::doTask(Consumer &consumer)
                 continue;
             }
 
-            if (!mtu.empty())
+            if (!mtu.empty() && mtu != DEFAULT_MTU_STR)
             {
                 setPortMtu(alias, mtu);
                 SWSS_LOG_NOTICE("Configure %s MTU to %s", alias.c_str(), mtu.c_str());

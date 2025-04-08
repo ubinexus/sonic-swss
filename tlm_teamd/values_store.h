@@ -51,6 +51,7 @@ private:
         { "runner.active",               ValuesStore::json_type::boolean },
         { "runner.fallback",             ValuesStore::json_type::boolean },
         { "runner.fast_rate",            ValuesStore::json_type::boolean },
+        { "runner.active_port",          ValuesStore::json_type::string  },
         { "team_device.ifinfo.dev_addr", ValuesStore::json_type::string  },
         { "team_device.ifinfo.ifindex",  ValuesStore::json_type::integer },
     };

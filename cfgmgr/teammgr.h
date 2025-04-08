@@ -41,7 +41,7 @@ private:
     void doLagMemberTask(Consumer &consumer);
     void doPortUpdateTask(Consumer &consumer);
 
-    task_process_status addLag(const std::string &alias, int min_links, bool fall_back, bool fast_rate);
+    task_process_status addLag(const std::string &alias, int min_links, bool fall_back, bool activebackup, bool fast_rate);
     bool removeLag(const std::string &alias);
     task_process_status addLagMember(const std::string &lag, const std::string &member);
     bool removeLagMember(const std::string &lag, const std::string &member);
@@ -59,6 +59,7 @@ private:
     bool isMACsecAttached(const std::string &);
     bool isMACsecIngressSAOk(const std::string &);
     uint16_t generateLacpKey(const std::string&);
+    bool isActiveBackup(const std::string&);
 };
 
 }

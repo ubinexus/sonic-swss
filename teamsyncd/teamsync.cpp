@@ -11,6 +11,8 @@
 #include "producerstatetable.h"
 #include "warm_restart.h"
 #include "teamsync.h"
+#include "exec.h"
+#include "shellcmd.h"
 
 #include <unistd.h>
 
@@ -184,7 +186,7 @@ void TeamSync::addLag(const string &lagName, int ifindex, bool admin_state,
     if (lag_update)
     {
         /* Create the team instance */
-        auto sync = make_shared<TeamPortSync>(lagName, ifindex, &m_lagMemberTable);
+        auto sync = make_shared<TeamPortSync>(lagName, ifindex, &m_lagTable, &m_lagMemberTable);
         m_teamSelectables[lagName] = sync;
         m_selectablesToAdd.insert(lagName);
     }
@@ -242,7 +244,9 @@ const struct team_change_handler TeamSync::TeamPortSync::gPortChangeHandler = {
 };
 
 TeamSync::TeamPortSync::TeamPortSync(const string &lagName, int ifindex,
+                                     ProducerStateTable *lagTable,
                                      ProducerStateTable *lagMemberTable) :
+    m_lagTable(lagTable),
     m_lagMemberTable(lagMemberTable),
     m_lagName(lagName),
     m_ifindex(ifindex)
@@ -314,6 +318,7 @@ int TeamSync::TeamPortSync::onChange()
 {
     struct team_port *port;
     map<string, bool> tmp_lag_members;
+    bool memberChanged = false;
 
     /* Check each port  */
     team_for_each_port(port, m_team)
@@ -351,7 +356,7 @@ int TeamSync::TeamPortSync::onChange()
             FieldValueTuple l("status", it.second ? "enabled" : "disabled");
             v.push_back(l);
             m_lagMemberTable->set(key, v);
-
+            memberChanged = true;
             SWSS_LOG_INFO("Set LAG %s member %s with status %s",
                     m_lagName.c_str(), it.first.c_str(), it.second ? "enabled" : "disabled");
         }
@@ -364,6 +369,7 @@ int TeamSync::TeamPortSync::onChange()
             string key = m_lagName + ":" + it.first;
             m_lagMemberTable->del(key);
 
+            memberChanged = true;
             SWSS_LOG_INFO("Remove member %s from LAG %s",
                     it.first.c_str(), m_lagName.c_str());
         }
@@ -371,7 +377,54 @@ int TeamSync::TeamPortSync::onChange()
 
     /* Replace the old LAG members with the new ones */
     m_lagMembers = tmp_lag_members;
+
+    if (memberChanged && isLagActiveBackup(m_lagName)) {
+        string active_port = getLagActivePort(m_lagName);
+        vector<FieldValueTuple> fvVector;
+        FieldValueTuple ab("activebackup", "true");
+        FieldValueTuple ap("active_port", active_port);
+        fvVector.push_back(ab);
+        fvVector.push_back(ap);
+        m_lagTable->set(m_lagName, fvVector);
+    }
     return 0;
+}
+
+bool TeamSync::TeamPortSync::isLagActiveBackup(const string &alias)
+{
+    stringstream cmd;
+    string res;
+
+    cmd << TEAMDCTL_CMD << " " << alias << " state -v | awk '/runner:/ {print $2; exit}'";
+    SWSS_LOG_DEBUG("Get Lag runner mode exec Command '%s'", cmd.str().c_str());
+    if (exec(cmd.str(), res) != 0)
+    {
+        SWSS_LOG_INFO("Failed to get %s runner mode.", alias.c_str());
+        return false;
+    }
+
+    if (res == "activebackup")
+    {
+        return true;
+    }
+    
+    return false;
+}
+
+string TeamSync::TeamPortSync::getLagActivePort(const string &alias)
+{
+    stringstream cmd;
+    string res;
+
+    cmd << TEAMDCTL_CMD << " " << alias << " state -v | awk '/active port:/ {print $3}'";
+    SWSS_LOG_DEBUG("Get Lag active port exec Command '%s'", cmd.str().c_str());
+    if (exec(cmd.str(), res) != 0)
+    {
+        SWSS_LOG_INFO("Failed to get %s active port.", alias.c_str());
+        return "";
+    }
+    SWSS_LOG_DEBUG("Get Lag %s active port %s", alias.c_str(), res.c_str());
+    return res;
 }
 
 int TeamSync::TeamPortSync::teamdHandler(struct team_handle *team, void *arg,

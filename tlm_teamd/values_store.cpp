@@ -63,7 +63,9 @@ json_t * ValuesStore::traverse(json_t * root, const std::vector<std::string> & p
         int err = json_unpack(cur_root, "{s:o}", key.c_str(), &cur);
         if (err != 0)
         {
-            throw std::runtime_error("Can't traverse through the path '" + path + "'. not found key = " + key);
+            // SWSS_LOG_WARN("Can't traverse through the path '%s'. not found key = %s", path.c_str(), key.c_str());
+            return nullptr;
+            // throw std::runtime_error("Can't traverse through the path '" + path + "'. not found key = " + key);
         }
         cur_root = cur;
     }
@@ -78,6 +80,13 @@ json_t * ValuesStore::traverse(json_t * root, const std::vector<std::string> & p
 std::string ValuesStore::unpack_string(json_t * root, const std::string & key, const std::string & path)
 {
     const auto & c_key = key.c_str();
+    // Check if the key exists in the JSON object
+    json_t * key_value = json_object_get(root, c_key);
+    if (key_value == nullptr) {
+        // Key not found, return an empty string
+        return ""; 
+    }
+    
     const char * str = nullptr;
     int err = json_unpack(root, "{s:s}", c_key, &str);
     if (err != 0)
@@ -94,6 +103,15 @@ std::string ValuesStore::unpack_string(json_t * root, const std::string & key, c
 std::string ValuesStore::unpack_boolean(json_t * root, const std::string & key, const std::string & path)
 {
     const auto & c_key = key.c_str();
+
+    // Check if the key exists in the JSON object
+    json_t * key_value = json_object_get(root, c_key);
+    if (key_value == nullptr) {
+        // Key not found, return a default value
+        return "false"; 
+    }
+
+    // Unpack the boolean value
     int value;
     int err = json_unpack(root, "{s:b}", c_key, &value);
     if (err != 0)
@@ -110,6 +128,14 @@ std::string ValuesStore::unpack_boolean(json_t * root, const std::string & key, 
 std::string ValuesStore::unpack_integer(json_t * root, const std::string & key, const std::string & path)
 {
     const auto & c_key = key.c_str();
+
+    // Check if the key exists in the JSON object
+    json_t * key_value = json_object_get(root, c_key);
+    if (key_value == nullptr) {
+        // Key not found, return a default value
+        return "0"; 
+    }
+        
     int value;
     int err = json_unpack(root, "{s:i}", c_key, &value);
     if (err != 0)
@@ -131,6 +157,10 @@ std::string ValuesStore::get_value(json_t * root, const std::string & path, Valu
     auto path_pair = convert_path(path);
 
     json_t * found_object = traverse(root, path_pair.first, path);
+    if (!found_object)
+    {
+        return "";
+    }
 
     const auto & key = path_pair.second;
 
@@ -160,6 +190,10 @@ void ValuesStore::extract_values(const std::string & lag_name, json_t * root, Ha
         const auto & path = p.first;
         const auto & type = p.second;
         const auto & value = get_value(root, path, type);
+        if (value.empty())
+        {
+            continue;
+        }
         lag_values.emplace(path, value);
     }
     storage.emplace(key, lag_values);
@@ -175,6 +209,10 @@ void ValuesStore::extract_values(const std::string & lag_name, json_t * root, Ha
             const auto & type = p.second;
             const std::string full_path = "ports." + port + "." + path;
             const auto & value = get_value(root, full_path, type);
+            if (value.empty())
+            {
+                continue;
+            }
             member_values.emplace(path, value);
         }
         storage.emplace(key, member_values);

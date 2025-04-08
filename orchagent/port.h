@@ -175,6 +175,7 @@ public:
     bool                m_admin_state_up = false;
     bool                m_init = false;
     bool                m_l3_vni = false;
+    bool                m_activebackup = false;
     sai_object_id_t     m_port_id = 0;
     sai_port_fec_mode_t m_fec_mode = SAI_PORT_FEC_MODE_NONE;
     VlanInfo            m_vlan_info;
@@ -194,6 +195,7 @@ public:
     uint32_t            m_dependency_bitmap = 0;
     sai_port_oper_status_t m_oper_status = SAI_PORT_OPER_STATUS_UNKNOWN;
     sai_port_error_status_t m_oper_error_status = SAI_PORT_ERROR_STATUS_CLEAR; //Bitmap of last port oper error status
+    std::string         m_active_port;
     std::set<std::string> m_members;
     std::set<std::string> m_child_ports;
     std::vector<sai_object_id_t> m_queue_ids;

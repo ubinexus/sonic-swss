@@ -5251,7 +5251,9 @@ void PortsOrch::doLagTask(Consumer &consumer)
             uint32_t lag_id = 0;
             int32_t switch_id = -1;
             string tpid_string;
+            string new_active_port;
             uint16_t tpid = 0;
+            bool new_activebackup = false;
 
             for (auto i : kfvFieldsValues(t))
             {
@@ -5298,7 +5300,17 @@ void PortsOrch::doLagTask(Consumer &consumer)
                     tpid_string.erase(0,2);
                     tpid = (uint16_t)stoi(tpid_string, 0, 16);
                     SWSS_LOG_DEBUG("reading TPID string:%s to uint16: 0x%x", tpid_string.c_str(), tpid);
-                 }
+                }
+                else if (fvField(i) == "active_port")
+                {
+                    new_active_port = fvValue(i);
+                    SWSS_LOG_DEBUG("reading active port string:%s", new_active_port.c_str());
+                }
+                else if (fvField(i) == "activebackup")
+                {
+                    new_activebackup = fvValue(i) == "true";
+                    SWSS_LOG_DEBUG("reading activebackup string %s", new_activebackup ? "true" : "false");
+                }
             }
 
             if (table_name == CHASSIS_APP_LAG_TABLE_NAME)
@@ -5395,6 +5407,41 @@ void PortsOrch::doLagTask(Consumer &consumer)
 
                         SWSS_LOG_NOTICE("Saved to set port %s learn mode %s", alias.c_str(), learn_mode_str.c_str());
                     }
+                }
+
+                SWSS_LOG_DEBUG("try to replace lag %s active port from %s to %s", alias.c_str(), l.m_active_port.c_str(), new_active_port.c_str());
+                if (l.m_activebackup && !l.m_active_port.empty() && (l.m_active_port != new_active_port)) 
+                {
+                    Port old_member;
+                    if (!getPort(l.m_active_port, old_member))
+                    {
+                        SWSS_LOG_ERROR("Failed to get lag %s current LAG member port:%s", alias.c_str(), l.m_active_port.c_str());
+                    } 
+                    else
+                    {
+                        removeLagMember(l, old_member);
+                    }
+                    l.m_active_port = "";
+                    m_portList[alias] = l;
+                } 
+
+                if (new_activebackup && !new_active_port.empty() && (l.m_active_port != new_active_port))
+                {
+                    Port new_member;
+                    if (!getPort(new_active_port, new_member))
+                    {
+                        SWSS_LOG_ERROR("Failed to get LAG member port:%s", new_active_port.c_str());
+                    } 
+                    else 
+                    {
+                        if (!addLagMember(l, new_member, "enabled"))
+                        {
+                            SWSS_LOG_ERROR("Failed to add LAG member %s to %s", new_active_port.c_str(), alias.c_str());
+                        }
+                    }
+                    l.m_activebackup = true;
+                    l.m_active_port = new_active_port;
+                    m_portList[alias] = l;
                 }
             }
 
@@ -5496,6 +5543,12 @@ void PortsOrch::doLagMemberTask(Consumer &consumer)
         /* Update a LAG member */
         if (op == SET_COMMAND)
         {
+            if (lag.m_activebackup)
+            {
+                it++;
+                continue;
+            }
+          
             string status;
             for (auto i : kfvFieldsValues(t))
             {
