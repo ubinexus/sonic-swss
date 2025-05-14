@@ -31,6 +31,9 @@ extern size_t gMaxBulkSize;
 #define DEFAULT_NUMBER_OF_ECMP_GROUPS   128
 #define DEFAULT_MAX_ECMP_GROUP_SIZE     32
 
+
+#define SAI_NEXT_HOP_GROUP_ATTR_HARDWARE_SWITCHOVER_ENABLE 10
+
 RouteOrch::RouteOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames, SwitchOrch *switchOrch, NeighOrch *neighOrch, IntfsOrch *intfsOrch, VRFOrch *vrfOrch, FgNhgOrch *fgNhgOrch, Srv6Orch *srv6Orch) :
         gRouteBulker(sai_route_api, gMaxBulkSize),
         gLabelRouteBulker(sai_mpls_api, gMaxBulkSize),
@@ -594,6 +597,7 @@ void RouteOrch::doTask(Consumer& consumer)
                 string srv6_segments;
                 string srv6_source;
                 bool srv6_nh = false;
+                string roles = "";
 
                 for (auto i : kfvFieldsValues(t))
                 {
@@ -630,6 +634,9 @@ void RouteOrch::doTask(Consumer& consumer)
 
                     if (fvField(i) == "seg_src")
                         srv6_source = fvValue(i);
+
+                    if (fvField(i) == "role")
+                       roles = fvValue(i);
                 }
 
                 /*
@@ -773,7 +780,7 @@ void RouteOrch::doTask(Consumer& consumer)
                             nhg_str += NH_DELIMITER + srv6_segv[i];
                             nhg_str += NH_DELIMITER + srv6_src[i];
                         }
-                        nhg = NextHopGroupKey(nhg_str, overlay_nh, srv6_nh);
+                        nhg = NextHopGroupKey(nhg_str, roles, overlay_nh, srv6_nh);
                         SWSS_LOG_INFO("SRV6 route with nhg %s", nhg.to_string().c_str());
                     }
                     else if (overlay_nh == false)
@@ -792,7 +799,7 @@ void RouteOrch::doTask(Consumer& consumer)
                             nhg_str += ipv[i] + NH_DELIMITER + alsv[i];
                         }
 
-                        nhg = NextHopGroupKey(nhg_str, weights);
+                        nhg = NextHopGroupKey(nhg_str, weights, roles);
                     }
                     else
                     {
@@ -802,7 +809,7 @@ void RouteOrch::doTask(Consumer& consumer)
                             nhg_str += ipv[i] + NH_DELIMITER + "vni" + alsv[i] + NH_DELIMITER + vni_labelv[i] + NH_DELIMITER + rmacv[i];
                         }
 
-                        nhg = NextHopGroupKey(nhg_str, overlay_nh, srv6_nh);
+                        nhg = NextHopGroupKey(nhg_str, roles, overlay_nh, srv6_nh);
                     }
                 }
                 else
@@ -1272,8 +1279,19 @@ bool RouteOrch::addNextHopGroup(const NextHopGroupKey &nexthops)
     vector<sai_attribute_t> nhg_attrs;
 
     nhg_attr.id = SAI_NEXT_HOP_GROUP_ATTR_TYPE;
-    nhg_attr.value.s32 = m_switchOrch->checkOrderedEcmpEnable() ? SAI_NEXT_HOP_GROUP_TYPE_DYNAMIC_ORDERED_ECMP : SAI_NEXT_HOP_GROUP_TYPE_ECMP;
-    nhg_attrs.push_back(nhg_attr);
+    if (nexthops.is_pw_nexthop())
+    {
+        nhg_attr.value.s32 = SAI_NEXT_HOP_GROUP_TYPE_PROTECTION;
+        nhg_attrs.push_back(nhg_attr);
+
+        memset(&nhg_attr, 0, sizeof(nhg_attr));
+        nhg_attr.id = SAI_NEXT_HOP_GROUP_ATTR_HARDWARE_SWITCHOVER_ENABLE;
+        nhg_attr.value.booldata = true;
+        nhg_attrs.push_back(nhg_attr);
+    } else {
+        nhg_attr.value.s32 = m_switchOrch->checkOrderedEcmpEnable() ? SAI_NEXT_HOP_GROUP_TYPE_DYNAMIC_ORDERED_ECMP : SAI_NEXT_HOP_GROUP_TYPE_ECMP;
+        nhg_attrs.push_back(nhg_attr);
+    }
 
     sai_object_id_t next_hop_group_id;
     sai_status_t status = sai_next_hop_group_api->create_next_hop_group(&next_hop_group_id,
@@ -1306,6 +1324,7 @@ bool RouteOrch::addNextHopGroup(const NextHopGroupKey &nexthops)
     {
         auto nhid = next_hop_ids[i];
         auto weight = nhopgroup_members_set[nhid].weight;
+        auto role = nhopgroup_members_set[nhid].role;
 
         // Create a next hop group member
         vector<sai_attribute_t> nhgm_attrs;
@@ -1318,6 +1337,19 @@ bool RouteOrch::addNextHopGroup(const NextHopGroupKey &nexthops)
         nhgm_attr.id = SAI_NEXT_HOP_GROUP_MEMBER_ATTR_NEXT_HOP_ID;
         nhgm_attr.value.oid = nhid;
         nhgm_attrs.push_back(nhgm_attr);
+
+        if (role == NEXTHOP_ROLE_PRIMARY)
+        {
+            nhgm_attr.id = SAI_NEXT_HOP_GROUP_MEMBER_ATTR_CONFIGURED_ROLE;
+            nhgm_attr.value.s32 = SAI_NEXT_HOP_GROUP_MEMBER_CONFIGURED_ROLE_PRIMARY;
+            nhgm_attrs.push_back(nhgm_attr);
+        }
+        else if (role == NEXTHOP_ROLE_STANDBY)
+        {
+            nhgm_attr.id = SAI_NEXT_HOP_GROUP_MEMBER_ATTR_CONFIGURED_ROLE;
+            nhgm_attr.value.s32 = SAI_NEXT_HOP_GROUP_MEMBER_CONFIGURED_ROLE_STANDBY;
+            nhgm_attrs.push_back(nhgm_attr);
+        }
 
         if (weight)
         {

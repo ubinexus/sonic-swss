@@ -98,7 +98,7 @@ private:
 
     bool getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
                         struct rtattr *tb[], vector<string> &vpn_sids,
-                        vector<string> &src_addrs);
+                        vector<string> &src_addrs, vector<string> &roles);
 
     bool getSrv6LocalSidNextHop(struct nlmsghdr *h, int received_bytes,
                                 struct rtattr *tb[], string &block_len,
@@ -108,7 +108,7 @@ private:
 
     /* Get next hop list */
     void getNextHopList(struct rtnl_route *route_obj, string& gw_list,
-                        string& mpls_list, string& intf_list);
+                        string& mpls_list, string& intf_list, string& role_list);
 
     /* Get next hop gateway IP addresses */
     string getNextHopGw(struct rtnl_route *route_obj);

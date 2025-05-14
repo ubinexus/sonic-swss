@@ -12,6 +12,12 @@
 #define VRF_PREFIX "Vrf"
 extern IntfsOrch *gIntfsOrch;
 
+typedef enum {
+    NEXTHOP_ROLE_NORMAL,
+    NEXTHOP_ROLE_PRIMARY,
+    NEXTHOP_ROLE_STANDBY,
+} NexthopRole;
+
 struct NextHopKey
 {
     IpAddress           ip_address;     // neighbor IP address
@@ -22,6 +28,7 @@ struct NextHopKey
     uint32_t            weight;         // NH weight for NHGs
     string              srv6_segment;   // SRV6 segment string
     string              srv6_source;    // SRV6 source address
+    NexthopRole         role;           // Nexthop role
 
     NextHopKey() : weight(0) {}
     NextHopKey(const std::string &str, const std::string &alias) :
