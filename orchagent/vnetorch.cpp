@@ -1973,7 +1973,7 @@ bool VNetRouteOrch::handleTunnel(const Request& request)
     SWSS_LOG_INFO("VNET-RT '%s' op '%s' for pfx %s", vnet_name.c_str(),
                    op.c_str(), ip_pfx.to_string().c_str());
 
-    NextHopGroupKey nhg("", true);
+    NextHopGroupKey nhg("", "", true);
     map<NextHopKey, IpAddress> monitors;
     for (size_t idx_ip = 0; idx_ip < ip_list.size(); idx_ip++)
     {

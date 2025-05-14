@@ -53,6 +53,9 @@ using namespace swss;
 #define DEFAULT_SRV6_LOCALSID_FUNC_LEN "16"
 #define DEFAULT_SRV6_LOCALSID_ARG_LEN "0"
 
+#define RTM_F_HAS_BACKUP    0x40000000  /* route has backup path */
+#define RTNH_F_BACKUP       0x80        /* Nexthop has backup path */
+
 enum srv6_localsid_action {
     SRV6_LOCALSID_ACTION_UNSPEC       = 0,
     SRV6_LOCALSID_ACTION_END          = 1,
@@ -815,11 +818,12 @@ void RouteSync::onEvpnRouteMsg(struct nlmsghdr *h, int len)
 
 bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
                                struct rtattr *tb[], vector<string> &vpn_sids,
-                               vector<string> &src_addrs)
+                               vector<string> &src_addrs, vector<string> &roles)
 {
     uint16_t encap = 0;
     string vpn_sid;
     string src_addr;
+    bool backup_found = false;
     if (h->nlmsg_type == RTM_NEWROUTE)
     {
         if (!tb[RTA_MULTIPATH])
@@ -893,11 +897,25 @@ bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
                     break;
                 }
 
+                if (rtnh->rtnh_flags & RTNH_F_BACKUP)
+                {
+                    roles.push_back("standby");
+                    backup_found = true;
+                }
+                else
+                {
+                    roles.push_back("primary");
+                }
+                
                 len -= NLMSG_ALIGN(rtnh->rtnh_len);
                 rtnh = RTNH_NEXT(rtnh);
             }
             // SWSS_LOG_NOTICE("Multipath SRv6 routes aren't supported");
             // return false;
+        }
+        if (!backup_found || roles.size() != 2)
+        {
+            roles.clear();
         }
     }
     return true;
@@ -1057,8 +1075,9 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
     
     vector<string> vpn_sid_strs;
     vector<string> src_addr_strs;
+    vector<string> role_strs;
 
-    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_strs, src_addr_strs);
+    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_strs, src_addr_strs, role_strs);
     if (ret == false)
     {
         SWSS_LOG_NOTICE("SRv6 Route issue with RouteTable invalid msg");
@@ -1075,6 +1094,7 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
 
     string segments;
     string seg_srcs;
+    string roles;
     for (uint32_t i = 0; i < vpn_sid_strs.size(); i++) 
     {
         /* Get nexthop lists */
@@ -1127,6 +1147,13 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
 
     FieldValueTuple seg_src("seg_src", seg_srcs);
     fvVectorRoute.push_back(seg_src);
+
+    if ((rtm->rtm_flags & RTM_F_HAS_BACKUP) &&
+        (role_strs.size() == 2)) {
+        roles = role_strs[0] + ',' + role_strs[1];
+        FieldValueTuple role("role", roles);
+        fvVectorRoute.push_back(role);
+    }
 
     if (!warmRestartInProgress)
     {
@@ -1683,7 +1710,8 @@ void RouteSync::onRouteMsg(int nlmsg_type, struct nl_object *obj, char *vrf)
     string gw_list;
     string intf_list;
     string mpls_list;
-    getNextHopList(route_obj, gw_list, mpls_list, intf_list);
+    string role_list;
+    getNextHopList(route_obj, gw_list, mpls_list, intf_list, role_list);
     string weights = getNextHopWt(route_obj);
 
     vector<string> alsv = tokenize(intf_list, NHG_DELIMITER);
@@ -1743,7 +1771,12 @@ void RouteSync::onRouteMsg(int nlmsg_type, struct nl_object *obj, char *vrf)
         FieldValueTuple wt("weight", weights);
         fvVector.push_back(wt);
     }
-
+    uint32_t rt_flags = rtnl_route_get_flags(route_obj);
+    if ((rt_flags & RTM_F_HAS_BACKUP) && !role_list.empty())
+    {
+        FieldValueTuple role("role", role_list);
+        fvVector.push_back(role);
+    }
     if (!warmRestartInProgress)
     {
         m_routeTable.set(destipprefix, fvVector);
@@ -1838,7 +1871,8 @@ void RouteSync::onLabelRouteMsg(int nlmsg_type, struct nl_object *obj)
     string gw_list;
     string intf_list;
     string mpls_list;
-    getNextHopList(route_obj, gw_list, mpls_list, intf_list);
+    string role_list;
+    getNextHopList(route_obj, gw_list, mpls_list, intf_list, role_list);
 
     vector<FieldValueTuple> fvVector;
     FieldValueTuple gw("nexthop", gw_list);
@@ -2009,9 +2043,10 @@ bool RouteSync::getIfName(int if_index, char *if_name, size_t name_len)
  * Return void
  */
 void RouteSync::getNextHopList(struct rtnl_route *route_obj, string& gw_list,
-                               string& mpls_list, string& intf_list)
+                               string& mpls_list, string& intf_list, string& role_list)
 {
     bool mpls_found = false;
+    bool backup_found = false;
 
     for (int i = 0; i < rtnl_route_get_nnexthops(route_obj); i++)
     {
@@ -2088,18 +2123,33 @@ void RouteSync::getNextHopList(struct rtnl_route *route_obj, string& gw_list,
         {
             intf_list += "unknown";
         }
+        uint8_t rtnh_flags = (uint8_t)rtnl_route_nh_get_flags(nexthop);
+        if (rtnh_flags & RTNH_F_BACKUP)
+        {
+            role_list += "standby";
+            backup_found = true;
+        }
+        else
+        {
+            role_list += "primary";
+        }
 
         if (i + 1 < rtnl_route_get_nnexthops(route_obj))
         {
             gw_list += NHG_DELIMITER;
             mpls_list += NHG_DELIMITER;
             intf_list += NHG_DELIMITER;
+            role_list += NHG_DELIMITER;
         }
     }
 
     if (!mpls_found)
     {
         mpls_list.clear();
+    }
+    if (!backup_found)
+    {
+        role_list.clear();
     }
 }
 

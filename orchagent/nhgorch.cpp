@@ -93,7 +93,7 @@ void NhgOrch::doTask(Consumer& consumer)
                 nhg_str += ipv[i] + NH_DELIMITER + alsv[i];
             }
 
-            NextHopGroupKey nhg_key = NextHopGroupKey(nhg_str, weights);
+            NextHopGroupKey nhg_key = NextHopGroupKey(nhg_str, weights, "");
 
             /* If the group does not exist, create one. */
             if (nhg_it == m_syncdNextHopGroups.end())
