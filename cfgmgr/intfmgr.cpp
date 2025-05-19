@@ -516,6 +516,50 @@ std::string IntfMgr::setHostSubIntfAdminStatus(const string &alias, const string
     }
 }
 
+void IntfMgr::updateSubIntfMac(const string &alias, const string &mac)
+{
+    string intf;
+    for (auto entry : m_subIntfList)
+    {
+        intf = entry.first;
+        subIntf subIf(intf);
+        if (subIf.parentIntf() == alias)
+        {
+            std::vector<FieldValueTuple> fvVector;
+
+            string subintf_mac = setHostSubIntfMac(intf, mac);
+
+            FieldValueTuple fvTuple("mac_addr", subintf_mac);
+            fvVector.push_back(fvTuple);
+            m_appIntfTableProducer.set(intf, fvVector);
+        }
+    }
+}
+
+std::string IntfMgr::setHostSubIntfMac(const string &alias, const string &mac)
+{
+    stringstream cmd;
+    string res;
+
+    SWSS_LOG_INFO("subintf %s active mac: %s", alias.c_str(), mac.c_str());
+    cmd << IP_CMD " link set " << shellquote(alias) << " address " << shellquote(mac);
+    std::string cmd_str = cmd.str();
+    int ret = swss::exec(cmd_str, res);
+
+    if (ret && !isIntfStateOk(alias))
+    {
+        // Can happen when a SET notification on the PORT_TABLE in the State DB
+        // followed by a new DEL notification that send by portmgrd
+        SWSS_LOG_WARN("Setting mac to %s netdev failed with cmd:%s, rc:%d, error:%s", alias.c_str(), cmd_str.c_str(), ret, res.c_str());
+    }
+    else if (ret)
+    {
+        throw runtime_error(cmd_str + " : " + res);
+    }
+
+    return mac;
+}
+
 void IntfMgr::removeHostSubIntf(const string &subIntf)
 {
     stringstream cmd;
@@ -1204,6 +1248,11 @@ void IntfMgr::doPortTableTask(const string& key, vector<FieldValueTuple> data, s
             {
                 SWSS_LOG_INFO("Port %s MTU %s", key.c_str(), value.c_str());
                 updateSubIntfMtu(key, value);
+            }
+            else if (field == "mac_addr")
+            {
+                SWSS_LOG_INFO("Port %s MAC %s", key.c_str(), value.c_str());
+                updateSubIntfMac(key, value);
             }
         }
     }

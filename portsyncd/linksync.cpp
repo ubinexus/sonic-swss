@@ -252,6 +252,10 @@ void LinkSync::onMsg(int nlmsg_type, struct nl_object *obj)
         vector.push_back(op);
         vector.push_back(admin_status);
         vector.push_back(port_mtu);
+
+        FieldValueTuple port_mac("mac_addr", addrStr);
+        vector.push_back(port_mac);
+
         m_statePortTable.set(key, vector);
         SWSS_LOG_NOTICE("Publish %s(ok:%s) to state db", key.c_str(), oper ? "up" : "down");
     }

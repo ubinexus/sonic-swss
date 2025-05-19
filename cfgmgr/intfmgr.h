@@ -65,6 +65,7 @@ private:
     void addHostSubIntf(const std::string&intf, const std::string &subIntf, const std::string &vlan);
     std::string setHostSubIntfMtu(const std::string &alias, const std::string &mtu, const std::string &parent_mtu);
     std::string setHostSubIntfAdminStatus(const std::string &alias, const std::string &admin_status, const std::string &parent_admin_status);
+    std::string setHostSubIntfMac(const std::string &alias, const std::string &mac);
     void removeHostSubIntf(const std::string &subIntf);
     void setSubIntfStateOk(const std::string &alias);
     void removeSubIntfState(const std::string &alias);
@@ -75,6 +76,7 @@ private:
 
     void updateSubIntfAdminStatus(const std::string &alias, const std::string &admin);
     void updateSubIntfMtu(const std::string &alias, const std::string &mtu);
+    void updateSubIntfMac(const std::string &alias, const std::string &mac);
     bool enableIpv6Flag(const std::string&);
 
     bool m_replayDone {false};
