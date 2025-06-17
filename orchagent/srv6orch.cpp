@@ -767,10 +767,6 @@ bool Srv6Orch::createUpdateMysidEntry(string my_sid_string, const string dt_vrf,
     attr.value.s32 = end_behavior;
     attributes.push_back(attr);
 
-    attr.id = SAI_MY_SID_ENTRY_ATTR_ENDPOINT_BEHAVIOR_FLAVOR;
-    attr.value.s32 = end_flavor;
-    attributes.push_back(attr);
-
     sai_status_t status = SAI_STATUS_SUCCESS;
     if (!entry_exists)
     {
