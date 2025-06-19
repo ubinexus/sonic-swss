@@ -52,6 +52,9 @@ using namespace swss;
 #define DEFAULT_SRV6_MY_SID_FUNC_LEN "16"
 #define DEFAULT_SRV6_MY_SID_ARG_LEN "0"
 
+#define RTM_F_HAS_BACKUP    0x40000000  /* route has backup path */
+#define RTNH_F_BACKUP       0x80        /* Nexthop has backup path */
+
 enum srv6_localsid_action {
 	SRV6_LOCALSID_ACTION_UNSPEC				= 0,
 	SRV6_LOCALSID_ACTION_END				= 1,
@@ -877,10 +880,13 @@ void RouteSync::onEvpnRouteMsg(struct nlmsghdr *h, int len)
 }
 
 bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
-                               struct rtattr *tb[], string &vpn_sid,
-                               string &src_addr)
+                               struct rtattr *tb[], vector<string> &vpn_sids,
+                               vector<string> &src_addrs, vector<string> &roles)
 {
     uint16_t encap = 0;
+    string vpn_sid;
+    string src_addr;
+    bool backup_found = false;
 
     if (!tb[RTA_MULTIPATH])
     {
@@ -894,12 +900,14 @@ bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
                 NH_ENCAP_SRV6_ROUTE)
         {
             parseEncapSrv6SteerRoute(tb[RTA_ENCAP], vpn_sid, src_addr);
+            vpn_sids.push_back(vpn_sid);
+            src_addrs.push_back(src_addr);
         }
         SWSS_LOG_DEBUG("Rx MsgType:%d encap:%d vpn_sid:%s src_addr:%s",
                         h->nlmsg_type, encap, vpn_sid.c_str(),
                         src_addr.c_str());
 
-        if (vpn_sid.empty())
+        if (vpn_sid.empty() || src_addr.empty())
         {
             SWSS_LOG_ERROR("Received an invalid SRv6 route: vpn_sid is empty");
             return false;
@@ -908,10 +916,70 @@ bool RouteSync::getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
     else
     {
         /* This is a multipath route */
-        SWSS_LOG_NOTICE("Multipath SRv6 routes aren't supported");
-        return false;
-    }
+        struct rtnexthop *rtnh = (struct rtnexthop *)RTA_DATA(tb[RTA_MULTIPATH]);
+        int len = (int)RTA_PAYLOAD(tb[RTA_MULTIPATH]);
+        struct rtattr *subtb[RTA_MAX + 1];
 
+        for (;;)
+        {
+            vpn_sid = "";
+            src_addr = "";
+            if (len < (int)sizeof(*rtnh) || rtnh->rtnh_len > len)
+            {
+                break;
+            }
+
+            if (rtnh->rtnh_len > sizeof(*rtnh))
+            {
+                memset(subtb, 0, sizeof(subtb));
+                netlink_parse_rtattr(subtb, RTA_MAX, RTNH_DATA(rtnh),
+                                    (int)(rtnh->rtnh_len - sizeof(*rtnh)));
+                if (subtb[RTA_ENCAP_TYPE])
+                {
+                    encap = *(uint16_t *)RTA_DATA(subtb[RTA_ENCAP_TYPE]);
+                    if (subtb[RTA_ENCAP] && subtb[RTA_ENCAP_TYPE] && 
+                        encap == NH_ENCAP_SRV6_ROUTE)
+                    {
+                        parseEncapSrv6SteerRoute(subtb[RTA_ENCAP], vpn_sid, src_addr);
+                        vpn_sids.push_back(vpn_sid);
+                        src_addrs.push_back(src_addr);
+                    }
+                    SWSS_LOG_DEBUG("Rx MsgType:%d encap:%d vpn_sid:%s src_addr:%s",
+                                h->nlmsg_type, encap, vpn_sid.c_str(),
+                                src_addr.c_str());
+
+                    if (vpn_sid.empty() || src_addr.empty())
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            if (rtnh->rtnh_len == 0)
+            {
+                break;
+            }
+
+            if (rtnh->rtnh_flags & RTNH_F_BACKUP)
+            {
+                roles.push_back("standby");
+                backup_found = true;
+            }
+            else
+            {
+                roles.push_back("primary");
+            }
+                
+            len -= NLMSG_ALIGN(rtnh->rtnh_len);
+            rtnh = RTNH_NEXT(rtnh);
+        }
+        // SWSS_LOG_NOTICE("Multipath SRv6 routes aren't supported");
+        // return false;
+    }
+    if (!backup_found || roles.size() != 2)
+    {
+        roles.clear();
+    }
     return true;
 }
 
@@ -1054,21 +1122,20 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
             return;
     }
 
-    /* Get nexthop lists */
-    string vpn_sid_str;
-    string src_addr_str;
     bool ret;
+    
+    vector<string> vpn_sid_strs;
+    vector<string> src_addr_strs;
+    vector<string> role_strs;
 
-    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_str, src_addr_str);
+    ret = getSrv6SteerRouteNextHop(h, len, tb, vpn_sid_strs, src_addr_strs, role_strs);
     if (ret == false)
     {
-        SWSS_LOG_NOTICE(
-            "SRv6 Route issue with RouteTable msg: %s vpn_sid:%s src_addr:%s",
-            destipprefix, vpn_sid_str.c_str(), src_addr_str.c_str());
+        SWSS_LOG_NOTICE("SRv6 Route issue with RouteTable invalid msg");
         return;
     }
 
-    if (vpn_sid_str.empty())
+    if (vpn_sid_strs.empty())
     {
         SWSS_LOG_NOTICE("SRv6 IP Prefix: %s vpn_sid is empty", destipprefix);
         return;
@@ -1076,14 +1143,82 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
 
     bool warmRestartInProgress = m_warmStartHelper.inProgress();
 
-    if (nlmsg_type == RTM_DELROUTE)
+    string segments;
+    string seg_srcs;
+    string roles;
+    for (uint32_t i = 0; i < vpn_sid_strs.size(); i++) 
     {
-        string srv6SidListTableKey = routeTableKey;
+        /* Get nexthop lists */
+        string vpn_sid_str;
+        string src_addr_str;
+        
+        vector<FieldValueTuple> fvVectorSidList;
+        vpn_sid_str = vpn_sid_strs[i];
+        FieldValueTuple sid_list("path", vpn_sid_str);
+        fvVectorSidList.push_back(sid_list);
 
+	    if (nlmsg_type == RTM_DELROUTE)
+	    {
+	        if (!warmRestartInProgress)
+	        {
+	            /* use vpn_sid as the key of sidlist*/
+	            m_srv6SidListTable.del(vpn_sid_str);
+	            SWSS_LOG_DEBUG("SidListTable del msg: %s vpn_sid: %s",
+	                       routeTableKey, vpn_sid_str.c_str());
+	        }
+	        else
+	        {
+	            SWSS_LOG_INFO(
+	            "Warm-Restart mode: and SidListTable del msg: %s vpn_sid:%s",
+	            routeTableKey, vpn_sid_str.c_str());
+            
+	            const KeyOpFieldsValuesTuple kfvSid =
+	                std::make_tuple(vpn_sid_str, DEL_COMMAND, fvVectorSidList);
+	            m_warmStartHelper.insertRefreshMap(kfvSid);
+	        }
+	    }
+	    else if (nlmsg_type == RTM_NEWROUTE)
+	    {
+	        if (!warmRestartInProgress)
+	        {
+	            /* use vpn_sid as the key of sidlist*/
+	            m_srv6SidListTable.set(vpn_sid_str, fvVectorSidList);
+	            SWSS_LOG_DEBUG("SidListTable set msg: %s vpn_sid: %s",
+	                           routeTableKey, vpn_sid_str.c_str());
+        	} 
+
+	        /*
+	        * During routing-stack restarting scenarios route-updates will be
+	        * temporarily put on hold by warm-reboot logic.
+	        */
+	        else 
+	        {
+	            SWSS_LOG_INFO("Warm-Restart mode: and SidListTable set msg: %s vpn_sid:%s",
+	                          routeTableKey, vpn_sid_str.c_str());
+	            const KeyOpFieldsValuesTuple kfvSid =
+	                std::make_tuple(vpn_sid_str, SET_COMMAND, fvVectorSidList);
+	            m_warmStartHelper.insertRefreshMap(kfvSid);
+	        }
+			
+	        src_addr_str = src_addr_strs[i];
+	        if (i > 0)
+	        {
+	            segments += ',' + vpn_sid_str;
+	            seg_srcs += ',' + src_addr_str;
+	        }
+	        else
+	        {
+	            segments += vpn_sid_str;
+	            seg_srcs += src_addr_str;
+	        }
+	    }
+    }
+
+	if (nlmsg_type == RTM_DELROUTE)
+    {
         if (!warmRestartInProgress)
         {
             m_routeTable.del(routeTableKey);
-            m_srv6SidListTable.del(srv6SidListTableKey);
             return;
         }
         else
@@ -1101,53 +1236,48 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
     }
     else if (nlmsg_type == RTM_NEWROUTE)
     {
-        /* Write SID list to SRV6_SID_LIST_TABLE */
-
-        string srv6SidListTableKey = routeTableKey;
-
-        vector<FieldValueTuple> fvVectorSidList;
-
-        FieldValueTuple path("path", vpn_sid_str);
-        fvVectorSidList.push_back(path);
-
-        m_srv6SidListTable.set(srv6SidListTableKey, fvVectorSidList);
-        SWSS_LOG_DEBUG("Srv6SidListTable set msg: %s path: %s",
-                        srv6SidListTableKey.c_str(), vpn_sid_str.c_str());
-
         /* Write route to ROUTE_TABLE */
-
         vector<FieldValueTuple> fvVectorRoute;
 
-        FieldValueTuple vpn_sid("segment", srv6SidListTableKey);
+	    /* FieldValueTuple vpn_sid("vpn_sid", vpn_sid_str); */
+	    /* The official solution for vpn_sid is only supported in versions after 202305, 
+	       and the current 202211 version uses the sidlist table to issue vpn_sid */
+        FieldValueTuple vpn_sid("segment", segments);
         fvVectorRoute.push_back(vpn_sid);
 
-        if (!src_addr_str.empty())
-        {
-            FieldValueTuple seg_src("seg_src", src_addr_str);
-            fvVectorRoute.push_back(seg_src);
-        }
-        if (!warmRestartInProgress)
-        {
-            m_routeTable.set(routeTableKey, fvVectorRoute);
-            SWSS_LOG_DEBUG("RouteTable set msg: %s vpn_sid: %s src_addr:%s",
-                        routeTableKey, vpn_sid_str.c_str(),
-                        src_addr_str.c_str());
+	    FieldValueTuple seg_src("seg_src", seg_srcs);
+	    fvVectorRoute.push_back(seg_src);
+
+	    if ((rtm->rtm_flags & RTM_F_HAS_BACKUP) &&
+	        (role_strs.size() == 2)) {
+	        roles = role_strs[0] + ',' + role_strs[1];
+	        FieldValueTuple role("role", roles);
+	        fvVectorRoute.push_back(role);
         }
 
-        /*
-        * During routing-stack restarting scenarios route-updates will be
-        * temporarily put on hold by warm-reboot logic.
-        */
-        else
-        {
-            SWSS_LOG_INFO(
-                "Warm-Restart mode: RouteTable set msg: %s vpn_sid:%s src_addr:%s",
-                routeTableKey, vpn_sid_str.c_str(), src_addr_str.c_str());
+	    if (!warmRestartInProgress)
+	    {
+	        m_routeTable.set(routeTableKey, fvVectorRoute);
+	        SWSS_LOG_DEBUG("RouteTable set msg: %s segments: %s seg_srcs:%s",
+	                       routeTableKey, segments.c_str(),
+	                       seg_srcs.c_str());
+	    }
 
-            const KeyOpFieldsValuesTuple kfv =
-                std::make_tuple(routeTableKey, SET_COMMAND, fvVectorRoute);
-            m_warmStartHelper.insertRefreshMap(kfv);
-        }
+	    /*
+	     * During routing-stack restarting scenarios route-updates will be
+	     * temporarily put on hold by warm-reboot logic.
+	     */
+	    else
+	    {
+	        SWSS_LOG_INFO(
+	            "Warm-Restart mode: RouteTable set msg: %s segments: %s seg_srcs:%s",
+	            routeTableKey, segments.c_str(),
+	            seg_srcs.c_str());
+
+	        const KeyOpFieldsValuesTuple kfvRt =
+	            std::make_tuple(routeTableKey, SET_COMMAND, fvVectorRoute);
+	        m_warmStartHelper.insertRefreshMap(kfvRt);
+	    }
     }
 
     return;
@@ -1648,7 +1778,8 @@ void RouteSync::onRouteMsg(int nlmsg_type, struct nl_object *obj, char *vrf)
     string gw_list;
     string intf_list;
     string mpls_list;
-    getNextHopList(route_obj, gw_list, mpls_list, intf_list);
+    string role_list;
+    getNextHopList(route_obj, gw_list, mpls_list, intf_list, role_list);
     string weights = getNextHopWt(route_obj);
 
     vector<string> alsv = tokenize(intf_list, NHG_DELIMITER);
@@ -1713,7 +1844,12 @@ void RouteSync::onRouteMsg(int nlmsg_type, struct nl_object *obj, char *vrf)
         FieldValueTuple wt("weight", weights);
         fvVector.push_back(wt);
     }
-
+    uint32_t rt_flags = rtnl_route_get_flags(route_obj);
+    if ((rt_flags & RTM_F_HAS_BACKUP) && !role_list.empty())
+    {
+        FieldValueTuple role("role", role_list);
+        fvVector.push_back(role);
+    }
     if (!warmRestartInProgress)
     {
         m_routeTable.set(destipprefix, fvVector);
@@ -1810,7 +1946,8 @@ void RouteSync::onLabelRouteMsg(int nlmsg_type, struct nl_object *obj)
     string gw_list;
     string intf_list;
     string mpls_list;
-    getNextHopList(route_obj, gw_list, mpls_list, intf_list);
+    string role_list;
+    getNextHopList(route_obj, gw_list, mpls_list, intf_list, role_list);
 
     vector<FieldValueTuple> fvVector;
     FieldValueTuple gw("nexthop", gw_list);
@@ -1995,9 +2132,10 @@ rtnl_link* RouteSync::getLinkByName(const char *name)
  * Return void
  */
 void RouteSync::getNextHopList(struct rtnl_route *route_obj, string& gw_list,
-                               string& mpls_list, string& intf_list)
+                               string& mpls_list, string& intf_list, string& role_list)
 {
     bool mpls_found = false;
+    bool backup_found = false;
 
     for (int i = 0; i < rtnl_route_get_nnexthops(route_obj); i++)
     {
@@ -2074,18 +2212,33 @@ void RouteSync::getNextHopList(struct rtnl_route *route_obj, string& gw_list,
         {
             intf_list += "unknown";
         }
+        uint8_t rtnh_flags = (uint8_t)rtnl_route_nh_get_flags(nexthop);
+        if (rtnh_flags & RTNH_F_BACKUP)
+        {
+            role_list += "standby";
+            backup_found = true;
+        }
+        else
+        {
+            role_list += "primary";
+        }
 
         if (i + 1 < rtnl_route_get_nnexthops(route_obj))
         {
             gw_list += NHG_DELIMITER;
             mpls_list += NHG_DELIMITER;
             intf_list += NHG_DELIMITER;
+            role_list += NHG_DELIMITER;
         }
     }
 
     if (!mpls_found)
     {
         mpls_list.clear();
+    }
+    if (!backup_found || role_list.size() != 2)
+    {
+        role_list.clear();
     }
 }
 

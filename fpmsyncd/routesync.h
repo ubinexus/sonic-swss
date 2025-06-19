@@ -145,7 +145,7 @@ private:
 
     /* Get next hop list */
     void getNextHopList(struct rtnl_route *route_obj, string& gw_list,
-                        string& mpls_list, string& intf_list);
+                        string& mpls_list, string& intf_list, string& role_list);
 
     /* Get next hop gateway IP addresses */
     string getNextHopGw(struct rtnl_route *route_obj);

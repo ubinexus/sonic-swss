@@ -2806,7 +2806,7 @@ bool VNetRouteOrch::handleTunnel(const Request& request)
 
     NextHopGroupKey nhg_primary("", true);
     NextHopGroupKey nhg_secondary("", true);
-    NextHopGroupKey nhg("", true);
+    NextHopGroupKey nhg("", "", true);
     map<NextHopKey, IpAddress> monitors;
     for (size_t idx_ip = 0; idx_ip < ip_list.size(); idx_ip++)
     {
