@@ -335,7 +335,11 @@ void IntfMgr::addHostSubIntf(const string&intf, const string &subIntf, const str
     string res;
 
     cmd << IP_CMD " link add link " << shellquote(intf) << " name " << shellquote(subIntf) << " type vlan id " << shellquote(vlan);
-    EXEC_WITH_ERROR_THROW(cmd.str(), res);
+    int ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+    }
 }
 
 
@@ -566,7 +570,11 @@ void IntfMgr::removeHostSubIntf(const string &subIntf)
     string res;
 
     cmd << IP_CMD " link del " << shellquote(subIntf);
-    EXEC_WITH_ERROR_THROW(cmd.str(), res);
+    int ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+    }
 }
 
 void IntfMgr::setSubIntfStateOk(const string &alias)
@@ -622,8 +630,15 @@ bool IntfMgr::setIntfGratArp(const string &alias, const string &grat_arp)
     }
 
     cmd << ECHO_CMD << " " << garp_enabled << " > /proc/sys/net/ipv4/conf/" << alias << "/arp_accept";
-    EXEC_WITH_ERROR_THROW(cmd.str(), res);
-    SWSS_LOG_INFO("ARP accept set to \"%s\" on interface \"%s\"",  grat_arp.c_str(), alias.c_str());
+    int ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+    } 
+    else
+    {
+        SWSS_LOG_INFO("ARP accept set to \"%s\" on interface \"%s\"",  grat_arp.c_str(), alias.c_str());
+    }
 
     cmd.clear();
     cmd.str(std::string());
@@ -636,8 +651,15 @@ bool IntfMgr::setIntfGratArp(const string &alias, const string &grat_arp)
         cmd.clear();
         cmd.str(std::string());
         cmd << ECHO_CMD << " " << garp_enabled << " > /proc/sys/net/ipv6/conf/" << alias << "/accept_untracked_na";
-        EXEC_WITH_ERROR_THROW(cmd.str(), res);
-        SWSS_LOG_INFO("`accept_untracked_na` set to \"%s\" on interface \"%s\"",  grat_arp.c_str(), alias.c_str());
+		ret = swss::exec(cmd.str(), res);
+        if (ret)
+        {
+            SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+        }
+        else
+        {
+            SWSS_LOG_INFO("`accept_untracked_na` set to \"%s\" on interface \"%s\"",  grat_arp.c_str(), alias.c_str());
+        }
     }
 
     return true;
@@ -664,15 +686,25 @@ bool IntfMgr::setIntfProxyArp(const string &alias, const string &proxy_arp)
     }
 
     cmd << ECHO_CMD << " " << proxy_arp_status << " > /proc/sys/net/ipv4/conf/" << alias << "/proxy_arp_pvlan";
-    EXEC_WITH_ERROR_THROW(cmd.str(), res);
+    int ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+    }
 
     cmd.clear();
     cmd.str(std::string());
 
     cmd << ECHO_CMD << " " << proxy_arp_status << " > /proc/sys/net/ipv4/conf/" << alias << "/proxy_arp";
-    EXEC_WITH_ERROR_THROW(cmd.str(), res);
-
-    SWSS_LOG_INFO("Proxy ARP set to \"%s\" on interface \"%s\"", proxy_arp.c_str(), alias.c_str());
+    ret = swss::exec(cmd.str(), res);
+    if (ret)
+    {
+        SWSS_LOG_ERROR("Command '%s' failed with rc %d", cmd.str().c_str(), ret);
+    }
+    else 
+    {
+        SWSS_LOG_INFO("Proxy ARP set to \"%s\" on interface \"%s\"", proxy_arp.c_str(), alias.c_str());
+    }
     return true;
 }
 
