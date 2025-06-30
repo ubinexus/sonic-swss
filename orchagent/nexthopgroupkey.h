@@ -101,6 +101,9 @@ public:
 
     inline bool operator<(const NextHopGroupKey &o) const
     {
+        if (m_pw < o.m_pw) {
+            return true;
+        }
         if (m_nexthops < o.m_nexthops)
         {
             return true;
@@ -126,6 +129,10 @@ public:
 
     inline bool operator==(const NextHopGroupKey &o) const
     {
+        if (m_pw != o.m_pw)
+        {
+            return false;
+        }
         if (m_nexthops != o.m_nexthops)
         {
             return false;
