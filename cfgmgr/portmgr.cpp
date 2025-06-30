@@ -219,7 +219,9 @@ void PortMgr::doTask(Consumer &consumer)
                 continue;
             }
 
-            if (!mtu.empty() && mtu != DEFAULT_MTU_STR)
+            /* 在DB中已经存在的MTU和默认MTU可能不一致，即使配置的MTU为默认值也要设置。*/
+            /* if (!mtu.empty() && mtu != DEFAULT_MTU_STR) */
+            if (!mtu.empty())
             {
                 setPortMtu(alias, mtu);
                 SWSS_LOG_NOTICE("Configure %s MTU to %s", alias.c_str(), mtu.c_str());

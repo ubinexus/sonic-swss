@@ -19,11 +19,11 @@ extern "C" {
 
 #define DEFAULT_PORT_VLAN_ID    1
 /*
- * Default MTU is derived from SAI_PORT_ATTR_MTU (1514)
+ * Default MTU is derived from SAI_PORT_ATTR_MTU (1514/9122)
  * Orchagent adds extra 22 bytes for Ethernet header and FCS,
- * hence setting to 1492 (1514 - 22)
+ * hence setting to 1492/9100 (1514/9122 - 22)
  */
-#define DEFAULT_MTU             1492
+#define DEFAULT_MTU             9100
 
 /*
  * Default TPID is 8100
