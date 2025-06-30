@@ -31,9 +31,6 @@ extern size_t gMaxBulkSize;
 #define DEFAULT_NUMBER_OF_ECMP_GROUPS   128
 #define DEFAULT_MAX_ECMP_GROUP_SIZE     32
 
-
-#define SAI_NEXT_HOP_GROUP_ATTR_HARDWARE_SWITCHOVER_ENABLE 10
-
 RouteOrch::RouteOrch(DBConnector *db, vector<table_name_with_pri_t> &tableNames, SwitchOrch *switchOrch, NeighOrch *neighOrch, IntfsOrch *intfsOrch, VRFOrch *vrfOrch, FgNhgOrch *fgNhgOrch, Srv6Orch *srv6Orch) :
         gRouteBulker(sai_route_api, gMaxBulkSize),
         gLabelRouteBulker(sai_mpls_api, gMaxBulkSize),
@@ -1282,16 +1279,12 @@ bool RouteOrch::addNextHopGroup(const NextHopGroupKey &nexthops)
     if (nexthops.is_pw_nexthop())
     {
         nhg_attr.value.s32 = SAI_NEXT_HOP_GROUP_TYPE_PROTECTION;
-        nhg_attrs.push_back(nhg_attr);
-
-        memset(&nhg_attr, 0, sizeof(nhg_attr));
-        nhg_attr.id = SAI_NEXT_HOP_GROUP_ATTR_HARDWARE_SWITCHOVER_ENABLE;
-        nhg_attr.value.booldata = true;
-        nhg_attrs.push_back(nhg_attr);
-    } else {
+    } 
+    else
+    {
         nhg_attr.value.s32 = m_switchOrch->checkOrderedEcmpEnable() ? SAI_NEXT_HOP_GROUP_TYPE_DYNAMIC_ORDERED_ECMP : SAI_NEXT_HOP_GROUP_TYPE_ECMP;
-        nhg_attrs.push_back(nhg_attr);
     }
+    nhg_attrs.push_back(nhg_attr);
 
     sai_object_id_t next_hop_group_id;
     sai_status_t status = sai_next_hop_group_api->create_next_hop_group(&next_hop_group_id,

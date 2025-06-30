@@ -2147,7 +2147,7 @@ void RouteSync::getNextHopList(struct rtnl_route *route_obj, string& gw_list,
     {
         mpls_list.clear();
     }
-    if (!backup_found || role_list.size() != 2)
+    if (!backup_found)
     {
         role_list.clear();
     }
