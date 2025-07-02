@@ -949,7 +949,7 @@ NextHopGroupKey VNetRouteOrch::getActiveNHSet(const string& vnet,
     // This  function takes  a nexthop group key and iterates over the nexthops in that group
     // to identify the ones which are active based on their monitor session state.
     // These next hops are collected into another next hop group key called nhg_custom and returned.
-    NextHopGroupKey nhg_custom("", true);
+    NextHopGroupKey nhg_custom("", "", true);
     set<NextHopKey> next_hop_set = nexthops.getNextHops();
     for (auto it : next_hop_set)
     {
@@ -1120,7 +1120,7 @@ bool VNetRouteOrch::doRouteTask<VNetVrfObject>(const string& vnet, IpPrefix& ipP
     if (op == SET_COMMAND)
     {
         sai_object_id_t nh_id = SAI_NULL_OBJECT_ID;
-        NextHopGroupKey active_nhg("", true);
+        NextHopGroupKey active_nhg("", "", true);
         if (!selectNextHopGroup(vnet, nexthops, nexthops_secondary, monitoring, ipPrefix, vrf_obj, active_nhg, monitors))
         {
             return true;
@@ -2507,7 +2507,7 @@ void VNetRouteOrch::updateVnetTunnelCustomMonitor(const MonitorUpdate& update)
     auto primary = route->second.primary;
     auto secondary = route->second.secondary;
     auto active_nhg = route->second.nhg_key;
-    NextHopGroupKey nhg_custom("", true);
+    NextHopGroupKey nhg_custom("", "", true);
     sai_ip_prefix_t pfx;
     copy(pfx, prefix);
     NextHopGroupKey nhg_custom_primary = getActiveNHSet( vnet, primary, prefix);
@@ -2804,8 +2804,8 @@ bool VNetRouteOrch::handleTunnel(const Request& request)
         SWSS_LOG_INFO("Handling Priority Tunnel with prefix %s", ip_pfx.to_string().c_str());
     }
 
-    NextHopGroupKey nhg_primary("", true);
-    NextHopGroupKey nhg_secondary("", true);
+    NextHopGroupKey nhg_primary("", "", true);
+    NextHopGroupKey nhg_secondary("", "", true);
     NextHopGroupKey nhg("", "", true);
     map<NextHopKey, IpAddress> monitors;
     for (size_t idx_ip = 0; idx_ip < ip_list.size(); idx_ip++)

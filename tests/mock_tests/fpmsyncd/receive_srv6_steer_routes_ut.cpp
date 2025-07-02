@@ -84,11 +84,11 @@ namespace ut_fpmsyncd
         m_fpmLink->processRawMsg(&nl_obj->n);
 
         /* Check that fpmsyncd created the correct entries in APP_DB */
-        ASSERT_EQ(m_srv6SidListTable->hget("Vrf10:192.168.6.0/24", "path", path), true);
+        ASSERT_EQ(m_srv6SidListTable->hget("fc00:0:2:1::", "path", path), true);
         ASSERT_EQ(path, _vpn_sid.to_string());
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:192.168.6.0/24", "segment", segment), true);
-        ASSERT_EQ(segment, "Vrf10:192.168.6.0/24");
+        ASSERT_EQ(segment, "fc00:0:2:1::");
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:192.168.6.0/24", "seg_src", seg_src), true);
         ASSERT_EQ(seg_src, _encap_src_addr.to_string());
@@ -139,11 +139,11 @@ namespace ut_fpmsyncd
         m_fpmLink->processRawMsg(&nl_obj->n);
 
         /* Check that fpmsyncd created the correct entries in APP_DB */
-        ASSERT_EQ(m_srv6SidListTable->hget("Vrf10:192.168.6.1", "path", path), true);
+        ASSERT_EQ(m_srv6SidListTable->hget("fc00:0:2:1::", "path", path), true);
         ASSERT_EQ(path, _vpn_sid.to_string());
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:192.168.6.1", "segment", segment), true);
-        ASSERT_EQ(segment, "Vrf10:192.168.6.1");
+        ASSERT_EQ(segment, "fc00:0:2:1::");
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:192.168.6.1", "seg_src", seg_src), true);
         ASSERT_EQ(seg_src, _encap_src_addr.to_string());
@@ -193,11 +193,11 @@ namespace ut_fpmsyncd
         m_fpmLink->processRawMsg(&nl_obj->n);
 
         /* Check that fpmsyncd created the correct entries in APP_DB */
-        ASSERT_EQ(m_srv6SidListTable->hget("Vrf10:fd00:0:21::/64", "path", path), true);
+        ASSERT_EQ(m_srv6SidListTable->hget("fc00:0:2:1::", "path", path), true);
         ASSERT_EQ(path, _vpn_sid.to_string());
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:fd00:0:21::/64", "segment", segment), true);
-        ASSERT_EQ(segment, "Vrf10:fd00:0:21::/64");
+        ASSERT_EQ(segment, "fc00:0:2:1::");
 
         ASSERT_EQ(m_routeTable->hget("Vrf10:fd00:0:21::/64", "seg_src", seg_src), true);
         ASSERT_EQ(seg_src, _encap_src_addr.to_string());

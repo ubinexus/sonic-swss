@@ -141,8 +141,8 @@ private:
                         string& intf_list);
 
     bool getSrv6SteerRouteNextHop(struct nlmsghdr *h, int received_bytes,
-                        struct rtattr *tb[], string &vpn_sid, string &src_addr);
-
+                        struct rtattr *tb[], vector<string> &vpn_sids,
+                        vector<string> &src_addrs, vector<string> &roles);
     /* Get next hop list */
     void getNextHopList(struct rtnl_route *route_obj, string& gw_list,
                         string& mpls_list, string& intf_list, string& role_list);
