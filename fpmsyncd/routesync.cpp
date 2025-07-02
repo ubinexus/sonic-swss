@@ -1100,6 +1100,8 @@ void RouteSync::onSrv6SteerRouteMsg(struct nlmsghdr *h, int len)
         return;
     }
 
+    sendOffloadReply(h);
+
     switch (rtm->rtm_type)
     {
         case RTN_BLACKHOLE:
@@ -1346,6 +1348,8 @@ void RouteSync::onSrv6MySidMsg(struct nlmsghdr *h, int len)
                        sid_value_str);
         return;
     }
+
+    sendOffloadReply(h);
 
     /* Get nexthop lists */
     string block_len_str;
@@ -2355,8 +2359,7 @@ string RouteSync::getNextHopWt(struct rtnl_route *route_obj)
 bool RouteSync::sendOffloadReply(struct nlmsghdr* hdr)
 {
     SWSS_LOG_ENTER();
-
-    if (hdr->nlmsg_type != RTM_NEWROUTE)
+    if ((hdr->nlmsg_type != RTM_NEWROUTE) && (hdr->nlmsg_type != RTM_NEWSRV6LOCALSID))
     {
         return false;
     }
