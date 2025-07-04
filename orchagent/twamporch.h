@@ -105,6 +105,8 @@ private:
     unique_ptr<Table> m_vidToRidTable;
     Table m_stateDbTwampTable;
 
+    map<int, string> m_twampGetStatsTimerIds;
+
     bool validateUdpPort(uint16_t udp_port);
     void increaseTwampSessionCount(void);
     void decreaseTwampSessionCount(void);
@@ -131,6 +133,10 @@ private:
     void calculateCounters(const string&, const uint32_t index, const vector<uint64_t>& stats);
     void saveCountersTotal(const string&, const sai_object_id_t session_id);
     void doTask(NotificationConsumer& consumer);
+    void startSessionGetStatsTimer(const string& name, const uint32_t interval);
+    void stopSessionGetStatsTimer(const string& name);
+    void calculateCounters2(const string&, const uint32_t index, const vector<uint64_t>& stats);
+    void doTask(SelectableTimer &timer);
 };
 
 #endif /* SWSS_TWAMPORCH_H */

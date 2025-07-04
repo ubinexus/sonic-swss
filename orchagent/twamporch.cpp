@@ -8,6 +8,7 @@
 #include "tokenize.h"
 #include "notifier.h"
 #include "notifications.h"
+#include "timer.h"
 
 #include <exception>
 
@@ -51,6 +52,11 @@ using namespace swss;
 
 #define TWAMP_SESSION_TIMEOUT_MIN    1
 #define TWAMP_SESSION_TIMEOUT_MAX    10
+
+#define TWAMP_PACKET_BASE_LENGTH_IPV4    87
+#define TWAMP_PACKET_BASE_LENGTH_IPV6    107
+#define TWAMP_SENDER_TEST_PACKET_HEADER_LENGTH  14
+#define TWAMP_REFLECTOR_TEST_PACKET_HEADER_LENGTH 41
 
 static map<string, sai_twamp_session_role_t> twamp_role_map =
 {
@@ -161,6 +167,12 @@ TwampOrch::TwampOrch(TableConnector confDbConnector, TableConnector stateDbConne
     /* Initialize counter tables */
     m_counterTwampSessionNameMapTable = unique_ptr<Table>(new Table(m_countersDb.get(), COUNTERS_TWAMP_SESSION_NAME_MAP));
     m_countersTable = unique_ptr<Table>(new Table(m_countersDb.get(), COUNTERS_TABLE));
+
+    for (unsigned int i = 0; i < m_maxTwampSessionCount; i++)
+    {
+        auto timer_excutor = new ExecutableTimer(new SelectableTimer(timespec{0, 0}), this, "TWAMP_GETSTATSTIMER" + to_string(i));
+        Orch::addExecutor(timer_excutor);
+    }
 }
 
 bool TwampOrch::isSessionExists(const string& name)
@@ -410,7 +422,22 @@ bool TwampOrch::activateSession(const string& name, TwampEntry& entry)
         attr.id = SAI_TWAMP_SESSION_ATTR_SESSION_ENABLE_TRANSMIT;
         attr.value.booldata = entry.admin_state;
         attrs.emplace_back(attr);
+        
+        attr.id = SAI_TWAMP_SESSION_ATTR_PACKET_LENGTH;
+        attr.value.u32 = (entry.dst_ip.isV4() ? TWAMP_PACKET_BASE_LENGTH_IPV4 : TWAMP_PACKET_BASE_LENGTH_IPV6) -
+                         TWAMP_REFLECTOR_TEST_PACKET_HEADER_LENGTH + TWAMP_SENDER_TEST_PACKET_HEADER_LENGTH +
+                         entry.padding_size;
+        attrs.emplace_back(attr);
     }
+
+    // slave mandatory attribute missing
+    attr.id = SAI_TWAMP_SESSION_ATTR_TWAMP_ENCAPSULATION_TYPE;
+    attr.value.s32 = SAI_TWAMP_ENCAPSULATION_TYPE_IP;
+    attrs.emplace_back(attr);
+
+    attr.id = SAI_TWAMP_SESSION_ATTR_AUTH_MODE;
+    attr.value.s32 = SAI_TWAMP_SESSION_AUTH_MODE_UNAUTHENTICATED;
+    attrs.emplace_back(attr);
 
     setSessionStatus(name, TWAMP_SESSION_STATUS_INACTIVE);
 
@@ -504,15 +531,16 @@ task_process_status TwampOrch::createEntry(const string& key, const vector<Field
 {
     SWSS_LOG_ENTER();
 
-    if (!register_event_notif)
-    {
-        if (!registerTwampEventNotification())
-        {
-            SWSS_LOG_ERROR("TWAMP session for %s cannot be created", key.c_str());
-            return task_process_status::task_failed;
-        }
-        register_event_notif = true;
-    }
+    // SAI_SWITCH_ATTR_TWAMP_SESSION_EVENT_NOTIFY not supported
+    // if (!register_event_notif)
+    // {
+    //     if (!registerTwampEventNotification())
+    //     {
+    //         SWSS_LOG_ERROR("TWAMP session for %s cannot be created", key.c_str());
+    //         return task_process_status::task_failed;
+    //     }
+    //     register_event_notif = true;
+    // }
 
     if (!checkTwampSessionCount())
     {
@@ -738,11 +766,13 @@ task_process_status TwampOrch::updateEntry(const string& key, const vector<Field
                             removeSessionCounter(entry.session_id);
                             initSessionStats(key);
                         }
+                        startSessionGetStatsTimer(key, entry.statistics_interval);
                         setSessionStatus(key, TWAMP_SESSION_STATUS_ACTIVE);
                         SWSS_LOG_NOTICE("Activated twamp session %s", key.c_str());
                     }
                     else
                     {
+                        stopSessionGetStatsTimer(key);
                         setSessionStatus(key, TWAMP_SESSION_STATUS_INACTIVE);
                         SWSS_LOG_NOTICE("Deactivated twamp session %s", key.c_str());
                     }
@@ -784,6 +814,8 @@ task_process_status TwampOrch::deleteEntry(const string& key)
     }
 
     TwampEntry& entry = it->second;
+
+    stopSessionGetStatsTimer(key);
 
     if (!deactivateSession(key, entry))
     {
@@ -890,9 +922,12 @@ void TwampOrch::saveSessionStatsLatest(const sai_object_id_t session_id, const u
 
     vector<FieldValueTuple> values;
 
+    SWSS_LOG_NOTICE("%s:INDEX:%s", sai_serialize_object_id(session_id).c_str(), to_string(index).c_str());
+
     for (const auto& it: twamp_session_stat_ids)
     {
         values.emplace_back(sai_serialize_twamp_session_stat(it), to_string(stats[it]));
+        SWSS_LOG_NOTICE("%s: %s", sai_serialize_twamp_session_stat(it).c_str(), to_string(stats[it]).c_str());
     }
 
     m_countersTable->set(sai_serialize_object_id(session_id) + ":INDEX:" + to_string(index), values);
@@ -1050,4 +1085,148 @@ void TwampOrch::doTask(NotificationConsumer& consumer)
 
         sai_deserialize_free_twamp_session_event_ntf(count, twamp_session);
     }
+}
+
+void TwampOrch::startSessionGetStatsTimer(const string& name, const uint32_t interval)
+{
+    SWSS_LOG_ENTER();
+    assert(m_twampGetStatsTimerIds.size() <= m_maxTwampSessionCount);
+
+    int timer_id = -1;
+    for (auto &it: m_twampGetStatsTimerIds)
+    {
+        if (it.second == name)
+        {
+            timer_id = it.first;
+            break;
+        }
+    }
+    if (timer_id == -1)
+    {
+        for (int i = 0; i < (int)m_maxTwampSessionCount; i++)
+        {
+            if (m_twampGetStatsTimerIds.find(i) == m_twampGetStatsTimerIds.end())
+            {
+                timer_id = i;
+                break;
+            }
+        }
+    }
+    assert(timer_id > -1);
+    auto executor = static_cast<ExecutableTimer *>(getExecutor("TWAMP_GETSTATSTIMER" + to_string(timer_id)));
+    auto timer = executor->getSelectableTimer();
+    timer->setInterval(timespec{interval / 1000, interval % 1000 * 1000000});
+    timer->reset();
+    m_twampGetStatsTimerIds[timer_id] = name;
+}
+
+void TwampOrch::stopSessionGetStatsTimer(const string& name)
+{
+    SWSS_LOG_ENTER();
+
+    int timer_id = -1;
+    for (auto &it: m_twampGetStatsTimerIds)
+    {
+        if (it.second == name)
+        {
+            timer_id = it.first;
+            break;
+        }
+    }
+    if (timer_id == -1)
+    {
+        return;
+    }
+    auto executor = static_cast<ExecutableTimer *>(getExecutor("TWAMP_GETSTATSTIMER" + to_string(timer_id)));
+    auto timer = executor->getSelectableTimer();
+    timer->stop();
+    m_twampGetStatsTimerIds.erase(timer_id);
+    SWSS_LOG_NOTICE("Stop get stats timer for twamp session %s", name.c_str());
+}
+
+void TwampOrch::calculateCounters2(const string& name, const uint32_t index, const vector<uint64_t>& stats)
+{
+    SWSS_LOG_ENTER();
+
+    auto it = m_twampStatistics.find(name);
+    if (it == m_twampStatistics.end())
+    {
+        SWSS_LOG_ERROR("Failed to caculate non-existent twamp session %s", name.c_str());
+        return;
+    }
+
+    TwampStats& total_stats = it->second;
+    /* packets */
+    total_stats.rx_packets   = stats[SAI_TWAMP_SESSION_STAT_RX_PACKETS];
+    total_stats.rx_bytes     = stats[SAI_TWAMP_SESSION_STAT_RX_BYTE];
+    total_stats.tx_packets   = stats[SAI_TWAMP_SESSION_STAT_TX_PACKETS];
+    total_stats.tx_bytes     = stats[SAI_TWAMP_SESSION_STAT_TX_BYTE];
+    total_stats.drop_packets = stats[SAI_TWAMP_SESSION_STAT_DROP_PACKETS];
+
+    /* latency */
+    total_stats.max_latency = (stats[SAI_TWAMP_SESSION_STAT_MAX_LATENCY] > total_stats.max_latency) ?
+                               stats[SAI_TWAMP_SESSION_STAT_MAX_LATENCY] : total_stats.max_latency;
+    total_stats.min_latency = (index == 1) ? stats[SAI_TWAMP_SESSION_STAT_MIN_LATENCY] :
+                               ((stats[SAI_TWAMP_SESSION_STAT_MIN_LATENCY] < total_stats.min_latency) ?
+                                 stats[SAI_TWAMP_SESSION_STAT_MIN_LATENCY] : total_stats.min_latency);
+    total_stats.avg_latency_total = stats[SAI_TWAMP_SESSION_STAT_AVG_LATENCY];
+    total_stats.avg_latency = total_stats.avg_latency_total / index;
+
+    /* jitter */
+    total_stats.max_jitter = (stats[SAI_TWAMP_SESSION_STAT_MAX_JITTER] > total_stats.max_jitter) ?
+                              stats[SAI_TWAMP_SESSION_STAT_MAX_JITTER] : total_stats.max_jitter;
+    total_stats.min_jitter = (index == 1) ? stats[SAI_TWAMP_SESSION_STAT_MIN_JITTER] :
+                              ((stats[SAI_TWAMP_SESSION_STAT_MIN_JITTER] < total_stats.min_jitter) ?
+                                stats[SAI_TWAMP_SESSION_STAT_MIN_JITTER] : total_stats.min_jitter);
+    total_stats.avg_jitter_total = stats[SAI_TWAMP_SESSION_STAT_AVG_JITTER];
+    total_stats.avg_jitter = total_stats.avg_jitter_total / index;
+}
+
+void TwampOrch::doTask(SelectableTimer& timer)
+{
+    SWSS_LOG_ENTER();
+    SWSS_LOG_NOTICE("Get stats timer expired");
+
+    int timer_id = -1;
+    for (auto &ids: m_twampGetStatsTimerIds)
+    {
+        timer_id = ids.first;
+        auto executor = static_cast<ExecutableTimer *>(getExecutor("TWAMP_GETSTATSTIMER" + to_string(timer_id)));
+        if (executor->getSelectableTimer() == &timer)
+        {
+            break;
+        }
+    }
+    if (timer_id == -1)
+    {
+        SWSS_LOG_ERROR("Failed to find timer id for timer %p", &timer);
+        return;
+    }
+    string name = m_twampGetStatsTimerIds[timer_id];
+    TwampEntry twampEntry = m_twampEntries[name];
+    SWSS_LOG_NOTICE("Get stats for twamp session %s", name.c_str());
+    sai_object_id_t session_id = twampEntry.session_id;
+    vector<sai_stat_id_t> counter_ids;
+    for (const auto& id: twamp_session_stat_ids)
+    {
+        counter_ids.emplace_back(id);
+    }
+    uint32_t number_of_counters = (uint32_t)counter_ids.size();
+    vector<uint64_t> counters(number_of_counters);
+    sai_status_t status = sai_twamp_api->get_twamp_session_stats(session_id,
+                                                                 number_of_counters,
+                                                                 counter_ids.data(),
+                                                                 counters.data());
+    if (status != SAI_STATUS_SUCCESS)
+    {
+        SWSS_LOG_ERROR("Failed to get twamp session %s stats, status: %d",
+                        sai_serialize_object_id(session_id).c_str(), status);
+        return;
+    }
+    addCounterNameMap(name, session_id);
+    // ?: 需要实际验证看查询回来的stats数据是什么样的？
+    //       是增量的？还是全量的？
+    saveSessionStatsLatest(session_id, 1, counters);
+    calculateCounters2(name, 1, counters);
+    saveCountersTotal(name, session_id);
 }
