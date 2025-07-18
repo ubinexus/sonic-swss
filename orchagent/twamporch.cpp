@@ -772,7 +772,8 @@ task_process_status TwampOrch::updateEntry(const string& key, const vector<Field
                     }
                     else
                     {
-                        stopSessionGetStatsTimer(key);
+                        // stopSessionGetStatsTimer(key);
+                        startSessionGetStatsTimer(key, entry.timeout * 1000);
                         setSessionStatus(key, TWAMP_SESSION_STATUS_INACTIVE);
                         SWSS_LOG_NOTICE("Deactivated twamp session %s", key.c_str());
                     }
@@ -1229,4 +1230,9 @@ void TwampOrch::doTask(SelectableTimer& timer)
     saveSessionStatsLatest(session_id, 1, counters);
     calculateCounters2(name, 1, counters);
     saveCountersTotal(name, session_id);
+    
+    if (!twampEntry.admin_state) {
+        timer.stop();
+        m_twampGetStatsTimerIds.erase(timer_id);
+    }
 }
