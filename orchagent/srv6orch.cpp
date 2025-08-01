@@ -736,7 +736,7 @@ bool Srv6Orch::createUpdateMysidEntry(string my_sid_string, const string dt_vrf,
             return false;
         }
 
-        nexthop = NextHopKey(adj); 
+        nexthop = NextHopKey(adj + NH_DELIMITER + dt_vrf); 
         SWSS_LOG_INFO("Adjacency %s", adj.c_str());
         if (m_neighOrch->hasNextHop(nexthop))
         {
