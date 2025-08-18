@@ -508,11 +508,25 @@ bool TwampOrch::setSessionTransmitEn(TwampEntry& entry, string admin_state)
         SWSS_LOG_ERROR("Incorrect transmit value: %s", admin_state.c_str());
         return false;
     }
-
+    sai_status_t status;
+    if (found->second && entry.admin_state == false) {
+        vector<sai_stat_id_t> counter_ids;
+        for (const auto& id: twamp_session_stat_ids)
+        {
+            counter_ids.emplace_back(id);
+        }
+        uint32_t number_of_counters = (uint32_t)counter_ids.size();
+        status = sai_twamp_api->clear_twamp_session_stats(entry.session_id, number_of_counters, counter_ids.data());
+        if (status != SAI_STATUS_SUCCESS)
+        {
+            SWSS_LOG_ERROR("Failed to clear twamp session %" PRIx64 " stats, status %d",
+                            entry.session_id, status);
+        }
+    }
     sai_attribute_t attr;
     attr.id = SAI_TWAMP_SESSION_ATTR_SESSION_ENABLE_TRANSMIT;
     attr.value.booldata = found->second;
-    sai_status_t status = sai_twamp_api->set_twamp_session_attribute(entry.session_id, &attr);
+    status = sai_twamp_api->set_twamp_session_attribute(entry.session_id, &attr);
     if (status != SAI_STATUS_SUCCESS)
     {
         SWSS_LOG_ERROR("Failed to set twamp session %" PRIx64 " %s transmit, status %d",

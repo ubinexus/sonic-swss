@@ -25,6 +25,8 @@ using namespace swss;
 #define NHG_DELIMITER ','
 #define MY_SID_KEY_DELIMITER ':'
 
+#define NH_DELIMITER '@'
+
 #ifndef ETH_ALEN
 #define ETH_ALEN 6
 #endif
@@ -424,7 +426,24 @@ bool RouteSync::parseSrv6MySid(struct rtattr *tb[], string &block_len,
     action = mySidAction2Str(action_buf);
     vrf = vrf_buf;
     adj = adj_buf;
-
+    if (!adj.empty())
+    {
+        char if_name[IFNAMSIZ] = "0";
+        if (tb[SRV6_LOCALSID_OIF])
+        {    
+            int index = *(int *)RTA_DATA(tb[SRV6_LOCALSID_OIF]);
+            if (getIfName(index, if_name, IFNAMSIZ))
+            {
+                adj = adj + NH_DELIMITER + if_name;
+            }
+            else
+            {
+                SWSS_LOG_ERROR("Invalid Srv6 MySid: OIF index:%d", index);
+                return false;
+            }
+        }   
+    }
+    
     if (action == "unknown")
     {
         SWSS_LOG_ERROR("Invalid Srv6 MySid: action=%s", action.c_str());
