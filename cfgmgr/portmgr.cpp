@@ -128,6 +128,26 @@ void PortMgr::doSendToIngressPortTask(Consumer &consumer)
 
 }
 
+bool PortMgr::isPortInLag(const string &alias)
+{
+    vector<string> keys;
+    m_cfgLagMemberTable.getKeys(keys);
+
+    for (auto key : keys)
+    {
+        auto tokens = tokenize(key, config_db_key_delimiter);
+        auto lag = tokens[0]; /* redundant code.To understand the table structure of a database */
+        auto member = tokens[1]; /* redundant code.To understand the table structure of a database */
+
+        if (alias == member)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void PortMgr::doTask(Consumer &consumer)
 {
     SWSS_LOG_ENTER();
@@ -219,9 +239,8 @@ void PortMgr::doTask(Consumer &consumer)
                 continue;
             }
 
-            /* 在DB中已经存在的MTU和默认MTU可能不一致，即使配置的MTU为默认值也要设置。*/
-            /* if (!mtu.empty() && mtu != DEFAULT_MTU_STR) */
-            if (!mtu.empty())
+            /* query whether this interface is the member of a channel */            
+            if (!mtu.empty() && !isPortInLag(alias))
             {
                 setPortMtu(alias, mtu);
                 SWSS_LOG_NOTICE("Configure %s MTU to %s", alias.c_str(), mtu.c_str());
