@@ -910,7 +910,8 @@ void RouteOrch::doTask(Consumer& consumer)
                         it = consumer.m_toSync.erase(it);
                     }
                     /* fullmask subnet route is same as ip2me route */
-                    else if (ip_prefix.isFullMask() && m_intfsOrch->isPrefixSubnet(ip_prefix, alsv[0]))
+                    /* check ipPrefix addr in the intf addr subnet  */
+                    else if (ip_prefix.isFullMask() && m_intfsOrch->isPrefixInSubnet(ip_prefix, alsv[0]))
                     {
                         /* The prefix is full mask (/32 or /128) and it is an interface subnet route, so IntfOrch has already
                          * created an IP2ME route for it and we skip programming such route here as it already exists.
