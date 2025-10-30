@@ -135,6 +135,22 @@ bool IntfsOrch::isPrefixSubnet(const IpPrefix &ip_prefix, const string &alias)
     return false;
 }
 
+bool IntfsOrch::isPrefixInSubnet(const IpPrefix &ip_prefix, const string &alias)
+{
+    if (m_syncdIntfses.find(alias) == m_syncdIntfses.end())
+    {
+        return false;
+    }
+    for (auto &prefixIt: m_syncdIntfses[alias].ip_addresses)
+    {
+        if (prefixIt.isAddressInSubnet(ip_prefix.getIp()))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 string IntfsOrch::getRouterIntfsAlias(const IpAddress &ip, const string &vrf_name)
 {
     sai_object_id_t vrf_id = gVirtualRouterId;
