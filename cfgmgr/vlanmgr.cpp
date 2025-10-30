@@ -18,6 +18,7 @@ using namespace swss;
 #define DEFAULT_VLAN_ID     "1"
 #define DEFAULT_MTU_STR     "9100"
 #define VLAN_HLEN            4
+#define MAX_MTU_STR         "9216"
 
 extern MacAddress gMacAddress;
 
@@ -90,7 +91,7 @@ VlanMgr::VlanMgr(DBConnector *cfgDb, DBConnector *appDb, DBConnector *stateDb, c
       + BASH_CMD + " -c \""
       + IP_CMD + " link del " + DOT1Q_BRIDGE_NAME + " 2>/dev/null; "
       + IP_CMD + " link add " + DOT1Q_BRIDGE_NAME + " up type bridge && "
-      + IP_CMD + " link set " + DOT1Q_BRIDGE_NAME + " mtu " + DEFAULT_MTU_STR + " && "
+      + IP_CMD + " link set " + DOT1Q_BRIDGE_NAME + " mtu " + MAX_MTU_STR + " && "
       + IP_CMD + " link set " + DOT1Q_BRIDGE_NAME + " address " + gMacAddress.to_string() + " && "
       + BRIDGE_CMD + " vlan del vid " + DEFAULT_VLAN_ID + " dev " + DOT1Q_BRIDGE_NAME + " self; "
       + IP_CMD + " link del dev dummy 2>/dev/null; "
@@ -185,9 +186,11 @@ bool VlanMgr::setHostVlanMtu(int vlan_id, uint32_t mtu)
     int ret = swss::exec(cmds, res);
     if (ret == 0)
     {
+        SWSS_LOG_NOTICE("Setting mtu to vlan_id:%d mtu:%d, netdev ok with cmd:%s.", vlan_id, mtu, cmds.c_str());
         return true;
     }
-
+    SWSS_LOG_WARN("Setting mtu to vlan_id:%d mtu:%d, netdev failed with cmd:%s, rc:%d, error:%s",
+                   vlan_id, mtu, cmds.c_str(), ret, res.c_str());
     /* VLAN mtu should not be larger than member mtu */
     return false;
 }
@@ -415,6 +418,10 @@ void VlanMgr::doVlanTask(Consumer &consumer)
                     hostif_name = fvValue(i);
                 }
             }
+
+            /* Add host VLAN mtu */
+            setHostVlanMtu(vlan_id, stoi(mtu));
+
             /* fvVector should not be empty */
             if (fvVector.empty())
             {
@@ -422,14 +429,14 @@ void VlanMgr::doVlanTask(Consumer &consumer)
                 fvVector.push_back(a);
             }
 
-            FieldValueTuple m("mtu", mtu);
-            fvVector.push_back(m);
-
             FieldValueTuple mc("mac", mac);
             fvVector.push_back(mc);
 
             FieldValueTuple hostif_name_fvt("host_ifname", hostif_name);
             fvVector.push_back(hostif_name_fvt);
+
+            FieldValueTuple m("mtu", mtu);
+            fvVector.push_back(m);
 
             m_appVlanTableProducer.set(key, fvVector);
             m_vlans.insert(key);
