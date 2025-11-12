@@ -2,6 +2,7 @@
 #define SWSS_NEXTHOPGROUPKEY_H
 
 #include "nexthopkey.h"
+#include <boost/functional/hash.hpp>
 
 class NextHopGroupKey
 {
@@ -13,7 +14,7 @@ public:
     {
         m_overlay_nexthops = false;
         m_srv6_nexthops = false;
-        m_pw = false;
+        m_srv6_vpn = false;
         auto nhv = tokenize(nexthops, NHG_DELIMITER);
         for (const auto &nh : nhv)
         {
@@ -22,69 +23,50 @@ public:
     }
 
     /* ip_string|if_alias|vni|router_mac separated by ',' */
-    NextHopGroupKey(const std::string &nexthops, const std::string &roles, bool overlay_nh, bool srv6_nh = false)
+    NextHopGroupKey(const std::string &nexthops, bool overlay_nh, bool srv6_nh = false)
     {
-        auto nhv = tokenize(nexthops, NHG_DELIMITER);
-        auto rolev = tokenize(roles, NHG_DELIMITER);
-        bool set_role = rolev.size() == nhv.size();
-        m_pw = set_role;
-        m_overlay_nexthops = false;
-        m_srv6_nexthops = false;
         if (overlay_nh)
         {
             m_overlay_nexthops = true;
+            m_srv6_nexthops = false;
+            m_srv6_vpn = false;
+            auto nhv = tokenize(nexthops, NHG_DELIMITER);
+            for (const auto &nh_str : nhv)
+            {
+                auto nh = NextHopKey(nh_str, overlay_nh, srv6_nh);
+                m_nexthops.insert(nh);
+            }
         }
         else if (srv6_nh)
         {
+            m_overlay_nexthops = false;
             m_srv6_nexthops = true;
-        } 
-        else
-        {
-            return;
-        }
-        for (uint32_t i = 0; i < nhv.size(); i++)
-        {
-            auto nh = NextHopKey(nhv[i], overlay_nh, srv6_nh);
-            if (set_role)
+            m_srv6_vpn = false;
+            auto nhv = tokenize(nexthops, NHG_DELIMITER);
+            for (const auto &nh_str : nhv)
             {
-                if (rolev[i] == "primary")
+                auto nh = NextHopKey(nh_str, overlay_nh, srv6_nh);
+                m_nexthops.insert(nh);
+                if (nh.isSrv6Vpn())
                 {
-                    nh.role = NEXTHOP_ROLE_PRIMARY;
-                }
-                else if (rolev[i] == "standby")
-                {
-                    nh.role = NEXTHOP_ROLE_STANDBY;
+                    m_srv6_vpn = true;
                 }
             }
-            m_nexthops.insert(nh);
         }
     }
 
-    NextHopGroupKey(const std::string &nexthops, const std::string &weights, const std::string &roles)
+    NextHopGroupKey(const std::string &nexthops, const std::string &weights)
     {
         m_overlay_nexthops = false;
         m_srv6_nexthops = false;
+        m_srv6_vpn = false;
         std::vector<std::string> nhv = tokenize(nexthops, NHG_DELIMITER);
         std::vector<std::string> wtv = tokenize(weights, NHG_DELIMITER);
-        std::vector<std::string> rolev = tokenize(roles, NHG_DELIMITER);
         bool set_weight = wtv.size() == nhv.size();
-        bool set_role = rolev.size() == nhv.size();
-        m_pw = set_role;
         for (uint32_t i = 0; i < nhv.size(); i++)
         {
             NextHopKey nh(nhv[i]);
             nh.weight = set_weight? (uint32_t)std::stoi(wtv[i]) : 0;
-            if (set_role)
-            {
-                if (rolev[i] == "primary")
-                {
-                    nh.role = NEXTHOP_ROLE_PRIMARY;
-                }
-                else if (rolev[i] == "standby")
-                {
-                    nh.role = NEXTHOP_ROLE_STANDBY;
-                }
-            }
             m_nexthops.insert(nh);
         }
     }
@@ -101,9 +83,6 @@ public:
 
     inline bool operator<(const NextHopGroupKey &o) const
     {
-        if (m_pw < o.m_pw) {
-            return true;
-        }
         if (m_nexthops < o.m_nexthops)
         {
             return true;
@@ -129,10 +108,6 @@ public:
 
     inline bool operator==(const NextHopGroupKey &o) const
     {
-        if (m_pw != o.m_pw)
-        {
-            return false;
-        }
         if (m_nexthops != o.m_nexthops)
         {
             return false;
@@ -255,21 +230,34 @@ public:
         return m_srv6_nexthops;
     }
 
+    inline bool is_srv6_vpn() const
+    {
+        return m_srv6_vpn;
+    }
+
     void clear()
     {
         m_nexthops.clear();
     }
-    
-    inline bool is_pw_nexthop() const
-    {
-        return m_pw;
-    }
 
 private:
     std::set<NextHopKey> m_nexthops;
-    bool m_overlay_nexthops;
-    bool m_srv6_nexthops;
-    bool m_pw;
+    bool m_overlay_nexthops = false;
+    bool m_srv6_nexthops = false;
+    bool m_srv6_vpn = false;
+
+    // Support std::unordered_map
+    template <typename T>
+    friend class std::hash; 
 };
+
+namespace std {
+    template <>
+    struct hash<NextHopGroupKey> {
+        size_t operator()(const NextHopGroupKey& obj) const {
+            return boost::hash_range(obj.m_nexthops.begin(), obj.m_nexthops.end());
+        }
+    };
+}
 
 #endif /* SWSS_NEXTHOPGROUPKEY_H */

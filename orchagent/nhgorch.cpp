@@ -174,7 +174,7 @@ void NhgOrch::doTask(Consumer& consumer)
                 }
             }
 
-            NextHopGroupKey nhg_key = NextHopGroupKey(nhg_str, weights, "");
+            NextHopGroupKey nhg_key = NextHopGroupKey(nhg_str, weights);
 
             /* If the group does not exist, create one. */
             if (nhg_it == m_syncdNextHopGroups.end())

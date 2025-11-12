@@ -248,7 +248,7 @@ void RouteOrch::doLabelTask(Consumer& consumer)
                             nhg_str += ipv[i] + NH_DELIMITER + alsv[i];
                         }
 
-                        nhg = NextHopGroupKey(nhg_str, weights, "");
+                        nhg = NextHopGroupKey(nhg_str, weights);
                     }
                 }
                 else
